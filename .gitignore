@@ -3,3 +3,4 @@ dist/
 tools/voice/
 .env
 supabase.public.env
+.aider*

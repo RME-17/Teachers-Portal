@@ -1,0 +1,77 @@
+---
+description: Authoritative codebase map — jump to files; do not re-explore the tree
+alwaysApply: true
+---
+
+This is the authoritative map. Do NOT re-explore the codebase. Use this to jump straight to the right file, then read only that file.
+
+Full detail + audit backlog: NAVIGATION.md · Agent rules: AGENTS.md · Portals: .cursor/skills/rme-two-portals/SKILL.md
+
+**Last verified:** 2026-05-24 (`wc -l` Git Bash). Refresh when adding a new sidecar or major IPC (~2 weeks). Sync NAVIGATION.md + this file.
+
+## Symbol → file
+
+| Looking for | File |
+|-------------|------|
+| DOM IDs, IIFEs, dashboard cards, `boot()`, portals, dock, voice orb + text chat | `renderer.js` (`rmeVoiceAgentOrb` ~17301) |
+| Calendar, planner view, settings, wikilinks | `renderer-calendar.js`, `renderer-obsidian-view.js`, `renderer-settings.js`, `obsidian-links.js` |
+| Shell HTML/CSS, `#authGate`, `#appMain` | `index.html` |
+| Script load chain | `boot-launch.js` |
+| `ipcMain.handle`, sidecars, Notion IPC, window | `main.js` |
+| `contextBridge`, `teacherAuth`, `voiceApi` | `preload.js` |
+| Admin email allowlist | `auth-store.js` |
+| Voice orchestration (not IPC registration) | `lib/voice-agent.js` |
+| TTS Chatterbox only | `lib/tts/chatterbox.js`, `lib/tts/index.js` |
+| Whisper exe lifecycle | `lib/voice-agent/whisper-server.js` |
+| Voice paths / `.env` | `lib/voice-env-resolve.js` |
+| Chatterbox Python sidecar | `tools/tts/chatterbox-server.py` |
+| Whisper/ffmpeg (gitignored) | `tools/voice/` |
+| Notion REST + Claude tools | `lib/notion-api.js` |
+| Payslip table helpers | `notion-simplify.js` (root) |
+| LLM Notion JSON shrink | `lib/notion-simplify.js` (different module) |
+| Voice memory DB | `lib/supabase/voice-memory.js` |
+| RAG / embeddings | `lib/retrieval-pipeline.js`, `lib/embeddings.js` |
+| Text AI chat | `lib/ai-chat.js` |
+| Payslip PDF | `payslip-pdf.js` |
+| Planner on disk | `planner-file-store.js` |
+| Vault keywords | `keyword-index-service.js`, `lib/vault/keywordIndex.js` |
+| Postgres schema | `supabase/migrations/` |
+| Env bake for dist | `scripts/bake-supabase-public-env.cjs` |
+
+## Line anchors (`wc -l`)
+
+| File | Lines |
+|------|------:|
+| `main.js` | 3398 |
+| `preload.js` | 1518 |
+| `index.html` | 13487 |
+| `renderer.js` | 34048 |
+
+`renderer.js`: `isTeacherNavMode` 8439 · `toggleTheme` 18091 · `showAppPage` 22801 · `enterAdminApp` 32573 · `enterTeacherApp` 32794 · `boot` 32885
+
+## Security (`main.js` ~1857)
+
+`contextIsolation: true` · `nodeIntegration: false` · **`sandbox: false`** — do not flip without testing
+
+## Voice IPC (`main.js`)
+
+| Handle | Line |
+|--------|-----:|
+| `voice:warm-tts` | 2853 |
+| `voice:transcribe` | 2864 |
+| `voice:ask-claude` | 2875 |
+| `voice:speak` | 2896 |
+| `voice:assistant-turn` | 2903 |
+| `voice:set-voice` / `voice:get-voice` | 3234 / 3247 |
+
+Events: `voice:tts-chunk` 3211 · `voice:claude-delta` — Warm: `voice:warm-tts` only
+
+## Traps
+
+- `lib/tts/cartesia.js` in package.json build.files — missing file
+- `components/ui/` — unused
+- Two `notion-simplify.js` — different exports
+
+## Edit discipline
+
+Read target file only. Tabs. Chatterbox TTS only (AGENTS.md). New dashboard IIFEs before `toggleTheme`.

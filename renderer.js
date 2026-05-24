@@ -17301,10 +17301,18 @@ setupAccountSecurityPanels();
 // === Voice agent orb (background STT → Claude → Chatterbox-Turbo TTS; center toggle mic) ========
 (function rmeVoiceAgentOrb() {
   const ORB_ID = "rmeVoiceOrbBtn";
+  const STACK_ID = "rmeVoiceOrbStack";
+  const CHAT_ID = "rmeVoiceTextChat";
   const LOG_ID = "rmeVoiceErrorLog";
   const STYLE_ID = "rmeVoiceOrbStyles";
   const LEGACY_CARD_ID = "rmeVoiceAgentDashboardCard";
   let _voiceSystemPrompt = "";
+  /** @type {HTMLElement | null} */
+  let chatMessagesEl = null;
+  /** @type {HTMLTextAreaElement | null} */
+  let chatInputEl = null;
+  /** @type {HTMLButtonElement | null} */
+  let chatSendBtn = null;
 
   /** @returns {boolean} */
   function isTeacherPortal() {
@@ -17335,9 +17343,16 @@ setupAccountSecurityPanels();
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = [
-      "#" + ORB_ID + "{",
+      "#" + STACK_ID + "{",
       "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);",
-      "z-index:10050;width:3.25rem;height:3.25rem;padding:0;",
+      "z-index:10050;display:flex;flex-direction:column;align-items:center;gap:0.85rem;",
+      "pointer-events:none;",
+      "}",
+      "#" + STACK_ID + "[hidden]{display:none !important;}",
+      "#" + STACK_ID + " > *{pointer-events:auto;}",
+      "#" + ORB_ID + "{",
+      "position:relative;left:auto;top:auto;transform:none;",
+      "width:3.25rem;height:3.25rem;padding:0;",
       "display:inline-flex;align-items:center;justify-content:center;",
       "border-radius:50%;border:2px solid color-mix(in srgb,#fff 55%,#94a3b8 30%);",
       "background:color-mix(in srgb,#0f172a 72%,#1e293b);",
@@ -17346,6 +17361,12 @@ setupAccountSecurityPanels();
       "}",
       "#" + ORB_ID + "[hidden]{display:none !important;}",
       "#" + ORB_ID + " .rme-voice-orb-icon{width:1.35rem;height:1.35rem;pointer-events:none;}",
+      "#" + ORB_ID + '[data-state="warming"]{',
+      "border-color:color-mix(in srgb,#94a3b8 55%,#64748b);",
+      "box-shadow:0 0 0 2px color-mix(in srgb,#94a3b8 30%,transparent),",
+      "0 0 18px 4px color-mix(in srgb,#94a3b8 40%,transparent);",
+      "opacity:.72;cursor:wait;",
+      "}",
       "#" + ORB_ID + '[data-state="off"]{',
       "border-color:color-mix(in srgb,#ef4444 55%,#64748b);",
       "box-shadow:0 0 0 2px color-mix(in srgb,#ef4444 35%,transparent),",
@@ -17370,13 +17391,114 @@ setupAccountSecurityPanels();
       "background:color-mix(in srgb,#fff 78%,#e2e8f0);color:#0f172a;",
       "}",
       "#" + LOG_ID + "{",
-      "position:fixed;left:50%;top:calc(50% - 3rem);transform:translateX(-50%);",
-      "z-index:10049;max-width:24rem;padding:0.4rem 0.75rem;",
+      "position:absolute;bottom:calc(100% + 0.45rem);left:50%;transform:translateX(-50%);",
+      "z-index:1;max-width:24rem;padding:0.4rem 0.75rem;",
       "font-size:0.75rem;line-height:1.3;text-align:center;",
       "border-radius:6px;pointer-events:none;user-select:text;",
       "white-space:normal;word-break:break-word;",
       "transition:opacity .25s ease;",
       "}",
+      "#" + CHAT_ID + "{",
+      "width:min(22.5rem,calc(100vw - 2rem));max-height:min(16rem,28vh);",
+      "display:flex;flex-direction:column;gap:0;border-radius:22px;",
+      "isolation:isolate;overflow:hidden;",
+      "border:1px solid color-mix(in srgb,#fff 40%,#94a3b8 10%);",
+      "background:linear-gradient(165deg,color-mix(in srgb,#f8fafc 58%,transparent) 0%,",
+      "color-mix(in srgb,#eef2ff 42%,transparent) 48%,color-mix(in srgb,#e0f2fe 32%,transparent) 100%);",
+      "-webkit-backdrop-filter:blur(22px) saturate(138%);",
+      "backdrop-filter:blur(22px) saturate(138%);",
+      "box-shadow:",
+      "inset 0 1px 0 rgba(255,255,255,0.32),",
+      "inset 0 0 0 1px rgba(15,23,42,0.05),",
+      "0 10px 38px -8px rgba(15,23,42,0.13),",
+      "0 0 36px -6px color-mix(in srgb,#38bdf8 28%,transparent),",
+      "0 0 56px -12px color-mix(in srgb,#818cf8 18%,transparent);",
+      "transition:box-shadow .25s ease,opacity .2s ease;",
+      "}",
+      "#" + CHAT_ID + '[data-busy="true"]{',
+      "box-shadow:",
+      "inset 0 1px 0 rgba(255,255,255,0.28),",
+      "0 10px 38px -8px rgba(15,23,42,0.13),",
+      "0 0 42px -4px color-mix(in srgb,#38bdf8 38%,transparent);",
+      "}",
+      "html[data-theme='dark'] #" + CHAT_ID + "{",
+      "border:1px solid color-mix(in srgb,#fff 16%,#64748b 12%);",
+      "background:linear-gradient(165deg,color-mix(in srgb,#1e293b 50%,transparent) 0%,",
+      "color-mix(in srgb,#0f172a 34%,transparent) 55%,color-mix(in srgb,#172554 30%,transparent) 100%);",
+      "box-shadow:",
+      "inset 0 1px 0 rgba(255,255,255,0.14),",
+      "inset 0 0 0 1px rgba(0,0,0,0.26),",
+      "0 12px 40px -4px rgba(0,0,0,0.3),",
+      "0 0 44px -8px color-mix(in srgb,#38bdf8 22%,transparent),",
+      "0 0 64px -14px color-mix(in srgb,#6366f1 16%,transparent);",
+      "}",
+      ".rme-voice-text-chat-messages{",
+      "flex:1 1 auto;min-height:4.5rem;max-height:min(10.5rem,18vh);overflow-y:auto;",
+      "padding:0.55rem 0.65rem 0.35rem;display:flex;flex-direction:column;gap:0.45rem;",
+      "scrollbar-width:thin;",
+      "}",
+      ".rme-voice-text-chat-bubble{",
+      "max-width:92%;padding:0.42rem 0.62rem;border-radius:14px;",
+      "font-size:0.78rem;line-height:1.45;word-break:break-word;",
+      "}",
+      ".rme-voice-text-chat-bubble[data-role='user']{",
+      "align-self:flex-end;margin-left:auto;",
+      "background:color-mix(in srgb,#38bdf8 22%,#0f172a 78%);",
+      "color:#e0f2fe;border:1px solid color-mix(in srgb,#38bdf8 35%,transparent);",
+      "box-shadow:0 0 16px -4px color-mix(in srgb,#38bdf8 45%,transparent);",
+      "}",
+      ".rme-voice-text-chat-bubble[data-role='assistant']{",
+      "align-self:flex-start;",
+      "background:color-mix(in srgb,#fff 12%,#1e293b 88%);",
+      "color:#f1f5f9;border:1px solid color-mix(in srgb,#94a3b8 22%,transparent);",
+      "}",
+      "html[data-theme='light'] .rme-voice-text-chat-bubble[data-role='user']{",
+      "background:color-mix(in srgb,#3b82f6 14%,#fff 86%);color:#1e3a8a;",
+      "border-color:color-mix(in srgb,#3b82f6 28%,transparent);",
+      "box-shadow:0 0 18px -6px color-mix(in srgb,#3b82f6 35%,transparent);",
+      "}",
+      "html[data-theme='light'] .rme-voice-text-chat-bubble[data-role='assistant']{",
+      "background:color-mix(in srgb,#f8fafc 85%,#e2e8f0);color:#0f172a;",
+      "border-color:color-mix(in srgb,#94a3b8 30%,transparent);",
+      "}",
+      ".rme-voice-text-chat-form{",
+      "display:flex;align-items:flex-end;gap:0.4rem;padding:0.45rem 0.5rem 0.5rem;",
+      "border-top:1px solid color-mix(in srgb,#fff 18%,#64748b 20%);",
+      "background:color-mix(in srgb,#0f172a 8%,transparent);",
+      "}",
+      "html[data-theme='light'] .rme-voice-text-chat-form{",
+      "border-top-color:color-mix(in srgb,#94a3b8 25%,transparent);",
+      "background:color-mix(in srgb,#fff 35%,transparent);",
+      "}",
+      ".rme-voice-text-chat-input{",
+      "flex:1;min-height:2.1rem;max-height:5.5rem;resize:none;",
+      "padding:0.45rem 0.55rem;border-radius:12px;",
+      "border:1px solid color-mix(in srgb,#38bdf8 28%,#64748b 40%);",
+      "background:color-mix(in srgb,#0f172a 55%,transparent);color:#f8fafc;",
+      "font:inherit;font-size:0.8rem;line-height:1.35;",
+      "box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 0 12px -4px color-mix(in srgb,#38bdf8 25%,transparent);",
+      "}",
+      ".rme-voice-text-chat-input:focus{outline:none;",
+      "border-color:color-mix(in srgb,#38bdf8 65%,#818cf8);",
+      "box-shadow:0 0 0 2px color-mix(in srgb,#38bdf8 22%,transparent),",
+      "0 0 20px -2px color-mix(in srgb,#38bdf8 40%,transparent);",
+      "}",
+      "html[data-theme='light'] .rme-voice-text-chat-input{",
+      "background:color-mix(in srgb,#fff 88%,#e2e8f0);color:#0f172a;",
+      "}",
+      ".rme-voice-text-chat-send{",
+      "flex-shrink:0;width:2.1rem;height:2.1rem;padding:0;border-radius:12px;border:none;",
+      "cursor:pointer;font-size:1rem;font-weight:700;line-height:1;",
+      "color:#f8fafc;",
+      "background:linear-gradient(145deg,#38bdf8,#6366f1);",
+      "box-shadow:0 0 18px -2px color-mix(in srgb,#38bdf8 55%,transparent);",
+      "transition:transform .12s ease,box-shadow .12s ease,opacity .12s ease;",
+      "}",
+      ".rme-voice-text-chat-send:hover:not(:disabled){",
+      "transform:translateY(-1px);",
+      "box-shadow:0 0 22px 0 color-mix(in srgb,#38bdf8 50%,transparent);",
+      "}",
+      ".rme-voice-text-chat-send:disabled{opacity:0.45;cursor:not-allowed;}",
       "#" + LOG_ID + "[hidden]{display:none !important;}",
       "#" + LOG_ID + '[data-level="warn"]{',
       "background:color-mix(in srgb,#fbbf24 18%,#0f172a 82%);",
@@ -17406,7 +17528,7 @@ setupAccountSecurityPanels();
     document.head.appendChild(style);
   }
 
-  /** @type {{ busy: boolean; recording: boolean; warmed: boolean; mediaRecorder: MediaRecorder | null; chunks: Blob[]; stream: MediaStream | null; offDelta: (() => void) | null; offTtsChunk: (() => void) | null; orbBtn: HTMLButtonElement | null }} */
+  /** @type {{ busy: boolean; recording: boolean; warmed: boolean; mediaRecorder: MediaRecorder | null; chunks: Blob[]; stream: MediaStream | null; orbBtn: HTMLButtonElement | null; textChatWired: boolean; orbWired: boolean }} */
   const st = {
     busy: false,
     recording: false,
@@ -17415,7 +17537,102 @@ setupAccountSecurityPanels();
     chunks: [],
     stream: null,
     orbBtn: null,
+    textChatWired: false,
+    orbWired: false,
   };
+
+  /** @type {((userText: string, opts?: { playTts?: boolean; streamToChat?: boolean }) => Promise<void>) | null} */
+  let runAssistantUserTurnRef = null;
+
+  function setChatBusy(busy) {
+    const chat = document.getElementById(CHAT_ID);
+    if (chat instanceof HTMLElement) {
+      chat.dataset.busy = busy ? "true" : "false";
+    }
+    if (chatInputEl) chatInputEl.disabled = busy;
+    if (chatSendBtn) chatSendBtn.disabled = busy;
+  }
+
+  function scrollChatMessages() {
+    if (!chatMessagesEl) return;
+    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  }
+
+  /**
+   * @param {"user" | "assistant"} role
+   * @param {string} text
+   * @returns {HTMLElement}
+   */
+  function appendChatBubble(role, text) {
+    if (!chatMessagesEl) {
+      const el = document.createElement("div");
+      return el;
+    }
+    const bubble = document.createElement("div");
+    bubble.className = "rme-voice-text-chat-bubble";
+    bubble.dataset.role = role;
+    bubble.textContent = text;
+    chatMessagesEl.appendChild(bubble);
+    scrollChatMessages();
+    return bubble;
+  }
+
+  function wireTextChat() {
+    if (st.textChatWired) return;
+    const chat = document.getElementById(CHAT_ID);
+    if (!(chat instanceof HTMLElement)) return;
+    const form = chat.querySelector(".rme-voice-text-chat-form");
+    const input = chat.querySelector(".rme-voice-text-chat-input");
+    const sendBtn = chat.querySelector(".rme-voice-text-chat-send");
+    const messages = chat.querySelector(".rme-voice-text-chat-messages");
+    if (
+      !(form instanceof HTMLFormElement) ||
+      !(input instanceof HTMLTextAreaElement) ||
+      !(sendBtn instanceof HTMLButtonElement) ||
+      !(messages instanceof HTMLElement)
+    ) {
+      return;
+    }
+    chatMessagesEl = messages;
+    chatInputEl = input;
+    chatSendBtn = sendBtn;
+    st.textChatWired = true;
+
+    function resizeChatInput() {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 88) + "px";
+    }
+
+    input.addEventListener("input", resizeChatInput);
+
+    async function submitTextChat() {
+      const raw = String(input.value || "").trim();
+      if (!raw || st.busy || st.recording) return;
+      if (!runAssistantUserTurnRef) {
+        pushError("Voice API not ready", "warn");
+        return;
+      }
+      if (typeof window.__rmeVoiceStopPlayback === "function") {
+        window.__rmeVoiceStopPlayback();
+      }
+      input.value = "";
+      resizeChatInput();
+      appendChatBubble("user", raw);
+      await runAssistantUserTurnRef(raw, { playTts: false, streamToChat: true });
+    }
+
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      void submitTextChat();
+    });
+
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        void submitTextChat();
+      }
+    });
+  }
 
   /** @type {number | null} */
   let errorLogTimer = null;
@@ -17440,17 +17657,18 @@ setupAccountSecurityPanels();
     }, 8000);
   }
 
-  /** @param {"off" | "on" | "busy"} state */
+  /** @param {"off" | "on" | "busy" | "warming"} state */
   function setOrbState(state) {
     const btn = st.orbBtn;
     if (!(btn instanceof HTMLButtonElement)) return;
     btn.dataset.state = state;
     btn.setAttribute("aria-pressed", state === "on" ? "true" : "false");
-    btn.disabled = state === "busy";
+    btn.disabled = state === "busy" || state === "warming";
     const labels = {
       off: "Voice assistant off — click to talk",
       on: "Listening — click to stop and send",
       busy: "Processing voice reply",
+      warming: "Starting voice services...",
     };
     btn.setAttribute("aria-label", labels[state] || labels.off);
   }
@@ -17459,6 +17677,7 @@ setupAccountSecurityPanels();
     if (st.warmed) return;
     const api = window.voiceApi;
     if (!api || typeof api.warmTts !== "function") return;
+    setOrbState("warming");
     st.warmed = true;
     try {
       await api.warmTts();
@@ -17477,18 +17696,22 @@ setupAccountSecurityPanels();
           }
         }
       }
+      setOrbState("off");
     } catch (e) {
       st.warmed = false;
       const m = e instanceof Error ? e.message : String(e);
       console.warn("[voice] background warm failed:", m);
       pushError("Warm: " + m, "warn");
+      setOrbState("off");
     }
   }
 
   /** @param {HTMLButtonElement} orbBtn */
   function wireOrb(orbBtn) {
     st.orbBtn = orbBtn;
-    setOrbState("off");
+    if (st.orbWired) return;
+    st.orbWired = true;
+    setOrbState("warming");
 
     async function stopRecording() {
       if (!st.mediaRecorder || st.mediaRecorder.state === "inactive") {
@@ -17571,12 +17794,115 @@ setupAccountSecurityPanels();
       setOrbState("on");
     }
 
+    /**
+     * @param {string} userText
+     * @param {{ playTts?: boolean; streamToChat?: boolean }} [opts]
+     */
+    async function runAssistantUserTurn(userText, opts) {
+      const api = window.voiceApi;
+      const text = String(userText || "").trim();
+      if (!api || !text || typeof api.assistantTurn !== "function") return;
+
+      const playTts = opts?.playTts !== false;
+      const streamToChat = opts?.streamToChat === true;
+
+      st.busy = true;
+      setChatBusy(true);
+      if (playTts) {
+        resetVoicePlaybackSchedule();
+        getVoiceAudioContext();
+        setOrbState("speaking");
+        startVoiceGlow();
+      } else {
+        setOrbState("busy");
+      }
+
+      /** @type {HTMLElement | null} */
+      let assistantBubble = null;
+      let streamBuf = "";
+
+      try {
+        const history = window.__voiceHistory || [];
+        const unsubTts =
+          playTts && typeof api.onTtsChunk === "function"
+            ? api.onTtsChunk((detail) => {
+                if (detail.done) return;
+                if (detail.audio) scheduleVoiceTtsAudio(detail);
+              })
+            : () => {};
+        const unsubDelta =
+          streamToChat && typeof api.onClaudeDelta === "function"
+            ? api.onClaudeDelta((detail) => {
+                const chunk = detail && detail.text ? String(detail.text) : "";
+                if (!chunk) return;
+                if (!assistantBubble) {
+                  assistantBubble = appendChatBubble("assistant", "");
+                }
+                streamBuf += chunk;
+                assistantBubble.textContent = streamBuf;
+                scrollChatMessages();
+              })
+            : () => {};
+
+        const turnResult = await api.assistantTurn({
+          messages: [].concat(history, [{ role: "user", content: text }]),
+          maxTokens: 1024,
+          system: undefined,
+        });
+        unsubTts();
+        unsubDelta();
+
+        if (!turnResult?.ok) {
+          const m = turnResult?.error || "empty";
+          console.warn("[voice] assistant-turn:", m);
+          pushError("AI: " + m, "error");
+          return;
+        }
+        const fullText = String(turnResult.text || "").trim();
+        if (!fullText) {
+          console.warn("[voice] assistant-turn returned empty text");
+          return;
+        }
+        console.log("[voice] assistant:", fullText);
+
+        if (streamToChat) {
+          if (!assistantBubble) {
+            appendChatBubble("assistant", fullText);
+          } else {
+            assistantBubble.textContent = fullText;
+            scrollChatMessages();
+          }
+        }
+
+        window.__voiceHistory = (window.__voiceHistory || []).concat(
+          { role: "user", content: text },
+          { role: "assistant", content: fullText },
+        );
+        if (window.__voiceHistory.length > 50) {
+          window.__voiceHistory = window.__voiceHistory.slice(-50);
+        }
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        console.warn("[voice] assistant-turn:", m);
+        pushError("AI: " + m, "error");
+      } finally {
+        st.busy = false;
+        setChatBusy(false);
+        if (playTts && voiceGlowAnimId == null) {
+          setOrbState("off");
+        } else if (!playTts) {
+          setOrbState("off");
+        }
+      }
+    }
+
+    runAssistantUserTurnRef = runAssistantUserTurn;
+
     async function runPipeline(blob) {
       const api = window.voiceApi;
       if (!api || !blob || !blob.size) {
         return;
       }
-      st.busy = true;
       setOrbState("busy");
       if (typeof window.rmeDevConsoleShow === "function") {
         window.rmeDevConsoleShow();
@@ -17591,57 +17917,12 @@ setupAccountSecurityPanels();
         }
         const userText = String(stt.text).trim();
         console.log("[voice] you:", userText);
-
-        resetVoicePlaybackSchedule();
-        getVoiceAudioContext();
-        setOrbState("speaking");
-        startVoiceGlow();
-
-        const history = window.__voiceHistory || [];
-
-        let fullText = "";
-        const unsubTts = api.onTtsChunk((detail) => {
-          if (detail.done) return;
-          if (detail.audio) {
-            scheduleVoiceTtsAudio(detail);
-          }
-        });
-        const turnResult = await api.assistantTurn({
-          messages: [].concat(history, [{ role: "user", content: userText }]),
-          maxTokens: 1024,
-          system: _voiceSystemPrompt || undefined,
-        });
-        unsubTts();
-
-        if (!turnResult?.ok) {
-          const m = turnResult?.error || "empty";
-          console.warn("[voice] assistant-turn:", m);
-          pushError("AI: " + m, "error");
-          return;
-        }
-        fullText = String(turnResult.text || "").trim();
-        if (!fullText) {
-          console.warn("[voice] assistant-turn returned empty text");
-          return;
-        }
-        console.log("[voice] assistant:", fullText);
-
-        st.busy = false;
-
-        window.__voiceHistory = (window.__voiceHistory || []).concat(
-          { role: "user", content: userText },
-          { role: "assistant", content: fullText },
-        );
-        if (window.__voiceHistory.length > 50) {
-          window.__voiceHistory = window.__voiceHistory.slice(-50);
-        }
+        appendChatBubble("user", userText);
+        await runAssistantUserTurn(userText, { playTts: true, streamToChat: true });
       } catch (e) {
         const m = e instanceof Error ? e.message : String(e);
         console.warn("[voice] pipeline:", m);
         pushError("Pipeline: " + m, "error");
-      } finally {
-        st.busy = false;
-        if (voiceGlowAnimId == null) setOrbState("off");
       }
     }
 
@@ -17776,6 +18057,8 @@ setupAccountSecurityPanels();
       voiceNextStartTime = 0;
     }
 
+    window.__rmeVoiceStopPlayback = stopVoicePlayback;
+
     /**
      * Decode + schedule one chunk on the Web Audio timeline (gapless).
      * Returns a promise that resolves when the chunk has been QUEUED (not when it ends),
@@ -17889,6 +18172,7 @@ setupAccountSecurityPanels();
       void onOrbClick();
     });
 
+    wireTextChat();
     void warmVoiceInBackground();
   }
 
@@ -17897,24 +18181,38 @@ setupAccountSecurityPanels();
     '<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.71V19h2v-1.29A7 7 0 0 0 19 11h-2z"/>' +
     "</svg>";
 
-  function ensureOrb() {
-    document.getElementById(LEGACY_CARD_ID)?.remove();
+  function buildTextChat() {
+    const chat = document.createElement("div");
+    chat.id = CHAT_ID;
+    chat.className = "rme-voice-text-chat";
+    chat.setAttribute("role", "region");
+    chat.setAttribute("aria-label", "Voice assistant chat");
+    chat.innerHTML =
+      '<div class="rme-voice-text-chat-messages" aria-live="polite"></div>' +
+      '<form class="rme-voice-text-chat-form" autocomplete="off">' +
+      '<textarea class="rme-voice-text-chat-input" rows="1" placeholder="Type to the assistant…" aria-label="Message"></textarea>' +
+      '<button type="submit" class="rme-voice-text-chat-send" aria-label="Send">↑</button>' +
+      "</form>";
+    return chat;
+  }
 
-    const show = orbShouldShow();
-    let orb = document.getElementById(ORB_ID);
-    if (!show) {
-      if (orb instanceof HTMLElement) orb.hidden = true;
-      return;
+  function ensureVoiceStack() {
+    let stack = document.getElementById(STACK_ID);
+    if (!(stack instanceof HTMLElement)) {
+      stack = document.createElement("div");
+      stack.id = STACK_ID;
+      document.body.appendChild(stack);
     }
-
-    injectStyles();
     let logEl = document.getElementById(LOG_ID);
     if (!logEl) {
       logEl = document.createElement("div");
       logEl.id = LOG_ID;
       logEl.hidden = true;
-      document.body.appendChild(logEl);
+      stack.appendChild(logEl);
+    } else if (logEl.parentElement !== stack) {
+      stack.insertBefore(logEl, stack.firstChild);
     }
+    let orb = document.getElementById(ORB_ID);
     if (!(orb instanceof HTMLButtonElement)) {
       orb = document.createElement("button");
       orb.id = ORB_ID;
@@ -17922,10 +18220,35 @@ setupAccountSecurityPanels();
       orb.className = "rme-voice-orb-btn";
       orb.dataset.state = "off";
       orb.innerHTML = MIC_SVG;
-      wireOrb(orb);
-      document.body.appendChild(orb);
+      stack.appendChild(orb);
+    } else if (orb.parentElement !== stack) {
+      stack.appendChild(orb);
     }
-    orb.hidden = false;
+    wireOrb(/** @type {HTMLButtonElement} */ (orb));
+    let chat = document.getElementById(CHAT_ID);
+    if (!(chat instanceof HTMLElement)) {
+      chat = buildTextChat();
+      stack.appendChild(chat);
+    } else if (chat.parentElement !== stack) {
+      stack.appendChild(chat);
+    }
+    wireTextChat();
+    return stack;
+  }
+
+  function ensureOrb() {
+    document.getElementById(LEGACY_CARD_ID)?.remove();
+
+    const show = orbShouldShow();
+    injectStyles();
+    const stack = ensureVoiceStack();
+    if (!show) {
+      stack.hidden = true;
+      return;
+    }
+    stack.hidden = false;
+    const orb = document.getElementById(ORB_ID);
+    if (orb instanceof HTMLElement) orb.hidden = false;
     if (!st.warmed) void warmVoiceInBackground();
   }
 
@@ -17965,6 +18288,132 @@ function setAppTheme(theme) {
     /* ignore */
   }
 }
+
+/* === Voice Assistant Settings toggle (collapsed card, opens on click) === */
+(function rmeVoiceSettingsToggle() {
+  function init() {
+    if (document.getElementById("rmeVoiceSettingsToggle")) return;
+
+    var styleId = "rmeVoiceSettingsStyles";
+    if (!document.getElementById(styleId)) {
+      var s = document.createElement("style");
+      s.id = styleId;
+      s.textContent = [
+        "#rmeVoiceSettingsToggle{position:fixed;right:1rem;top:50%;",
+        "transform:translateY(-50%);z-index:10040;display:flex;flex-direction:column;",
+        "align-items:center;gap:.5rem;}",
+        "#rmeVoiceSettingsToggle .rme-vs-toggle-btn{display:flex;align-items:center;justify-content:center;",
+        "width:36px;height:36px;border-radius:50%;border:1px solid var(--rme-card-border,var(--card-border,#d1d5db));",
+        "background:var(--rme-card-bg,var(--card-bg,#fff));cursor:pointer;font-size:16px;",
+        "box-shadow:0 2px 8px rgba(0,0,0,.1);transition:all .2s ease;color:var(--text-primary,var(--fg,#111));}",
+        "#rmeVoiceSettingsToggle .rme-vs-toggle-btn:hover{border-color:var(--rme-accent,#3b82f6);",
+        "box-shadow:0 4px 14px rgba(59,130,246,.2);}",
+        "#rmeVoiceSettingsPanel{display:none;position:absolute;right:44px;top:50%;transform:translateY(-50%);",
+        "width:180px;background:var(--rme-card-bg,var(--card-bg,#fff));",
+        "border:1px solid var(--rme-card-border,var(--card-border,#e5e7eb));border-radius:10px;",
+        "padding:.85rem;box-shadow:0 4px 20px rgba(0,0,0,.12);}",
+        "#rmeVoiceSettingsPanel.rme-vs-open{display:block;}",
+        "#rmeVoiceSettingsPanel h4{margin:0 0 .6rem;font-size:.8rem;font-weight:600;",
+        "color:var(--text-primary,var(--fg,#111));}",
+        "#rmeVoiceSettingsPanel .rme-vs-group{font-size:.6rem;font-weight:600;",
+        "text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted,#6b7280);",
+        "margin:.4rem 0 .25rem;}",
+        "#rmeVoiceSettingsPanel .rme-vs-group:first-of-type{margin-top:0;}",
+        "#rmeVoiceSettingsPanel .rme-vs-opt{display:block;width:100%;padding:.4rem .55rem;",
+        "margin-bottom:.25rem;border:1px solid var(--rme-card-border,var(--card-border,#d1d5db));",
+        "border-radius:5px;background:var(--rme-card-bg,var(--card-bg,#f9fafb));",
+        "cursor:pointer;font-size:.72rem;font-weight:500;text-align:left;",
+        "color:var(--text-primary,var(--fg,#111));transition:all .12s ease;}",
+        "#rmeVoiceSettingsPanel .rme-vs-opt:hover{border-color:var(--rme-accent,#3b82f6);}",
+        "#rmeVoiceSettingsPanel .rme-vs-opt.rme-vs-active{border-color:var(--rme-accent,#3b82f6);",
+        "background:color-mix(in srgb,var(--rme-accent,#3b82f6) 14%,transparent);",
+        "box-shadow:0 0 0 1px var(--rme-accent,#3b82f6);}",
+      ].join("");
+      document.head.appendChild(s);
+    }
+
+    var wrapper = document.createElement("div");
+    wrapper.id = "rmeVoiceSettingsToggle";
+
+    var btn = document.createElement("button");
+    btn.className = "rme-vs-toggle-btn";
+    btn.title = "Voice Assistant Settings";
+    btn.textContent = "🎤";
+    wrapper.appendChild(btn);
+
+    var devBtn = document.createElement("button");
+    devBtn.className = "rme-vs-toggle-btn";
+    devBtn.type = "button";
+    devBtn.title = "Dev Console";
+    devBtn.textContent = "</>";
+    devBtn.addEventListener("click", function(ev) {
+      ev.stopPropagation();
+      if (typeof window.rmeDevConsoleShow === "function") {
+        window.rmeDevConsoleShow();
+      }
+    });
+    wrapper.appendChild(devBtn);
+
+    var panel = document.createElement("div");
+    panel.id = "rmeVoiceSettingsPanel";
+    panel.innerHTML = [
+      '<h4>Voice Settings</h4>',
+      '<div class="rme-vs-group">Male</div>',
+      '<button class="rme-vs-opt" data-voice="aaron">Aaron (British)</button>',
+      '<button class="rme-vs-opt" data-voice="andy">Andy (American)</button>',
+      '<div class="rme-vs-group">Female</div>',
+      '<button class="rme-vs-opt" data-voice="abigail">Abigail (American)</button>',
+      '<button class="rme-vs-opt" data-voice="lucy">Lucy (British)</button>',
+    ].join("");
+    wrapper.appendChild(panel);
+
+    document.body.appendChild(wrapper);
+
+    function highlight(name) {
+      panel.querySelectorAll(".rme-vs-opt").forEach(function(el) {
+        el.classList.toggle("rme-vs-active", el.dataset.voice === name);
+      });
+    }
+
+    btn.addEventListener("click", function(ev) {
+      ev.stopPropagation();
+      panel.classList.toggle("rme-vs-open");
+    });
+
+    panel.addEventListener("click", function(ev) {
+      var opt = ev.target.closest(".rme-vs-opt");
+      if (!opt) return;
+      var name = opt.dataset.voice;
+      if (!name) return;
+      highlight(name);
+      var api = window.voiceApi;
+      if (api && typeof api.setVoice === "function") {
+        api.setVoice(name).catch(function() {});
+      }
+    });
+
+    /* Click outside closes panel */
+    document.addEventListener("click", function(ev) {
+      if (!wrapper.contains(ev.target)) {
+        panel.classList.remove("rme-vs-open");
+      }
+    });
+
+    /* Load saved voice on init */
+    var api = window.voiceApi;
+    if (api && typeof api.getVoice === "function") {
+      api.getVoice().then(function(r) {
+        if (r && r.ok && r.voice) highlight(r.voice);
+      }).catch(function() {});
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    window.setTimeout(init, 200);
+  }
+})();
 
 function toggleTheme() {
   setAppTheme(getAppTheme() === "dark" ? "light" : "dark");

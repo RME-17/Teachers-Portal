@@ -1,0 +1,6 @@
+﻿FROM qwen2.5-coder:7b-instruct-q3_K_M
+PARAMETER num_ctx 16384
+PARAMETER num_predict 2048
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05

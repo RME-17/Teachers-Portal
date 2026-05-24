@@ -75,6 +75,16 @@ app = FastAPI(title="Chatterbox TTS")
 
 
 OUTPUT_SR = 48000
+VOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
+VOICE_MAP = {
+    "aaron": os.path.join(VOICE_DIR, "aaron.wav"),
+    "andy": os.path.join(VOICE_DIR, "andy.wav"),
+    "abigail": os.path.join(VOICE_DIR, "abigail.wav"),
+    "lucy": os.path.join(VOICE_DIR, "lucy.wav"),
+}
+
+# Cache for voice conditionals so we don't re-extract on every request
+_COND_CACHE = {}
 
 
 class TTSRequest(BaseModel):
@@ -92,8 +102,17 @@ async def speech(req: TTSRequest):
         exaggeration=req.exaggeration,
         cfg_weight=req.cfg_weight,
     )
-    if req.voice and os.path.isfile(req.voice):
-        kwargs["audio_prompt_path"] = req.voice
+    ref_path = VOICE_MAP.get(req.voice)
+    if not (ref_path and os.path.isfile(ref_path)):
+        if req.voice and os.path.isfile(req.voice):
+            ref_path = req.voice
+    if ref_path and os.path.isfile(ref_path):
+        if ref_path not in _COND_CACHE:
+            log.info("Preparing conditionals for voice from %s", ref_path)
+            model.prepare_conditionals(ref_path, exaggeration=req.exaggeration)
+            _COND_CACHE[ref_path] = model.conds
+        else:
+            model.conds = _COND_CACHE[ref_path]
     wav = model.generate(req.input, **kwargs)
     if isinstance(wav, tuple):
         wav = wav[0]
@@ -105,7 +124,7 @@ async def speech(req: TTSRequest):
         import librosa as _lb
         arr = _lb.resample(arr, orig_sr=model_sample_rate, target_sr=OUTPUT_SR).astype(_np.float32)
     buf = io.BytesIO()
-    sf.write(buf, arr, OUTPUT_SR, format="WAV", subtype="PCM_24")
+    sf.write(buf, arr, OUTPUT_SR, format="WAV", subtype="PCM_16")
     return Response(content=buf.getvalue(), media_type="audio/wav")
 
 
