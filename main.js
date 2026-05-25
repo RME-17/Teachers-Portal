@@ -3250,14 +3250,14 @@ ipcMain.handle('dream:reset', async () => {
 
       /* Discord tools — always register definitions; handler routes via onToolCall */
       try {
-        const discordTools = require('./discord/ai-tools');
+        const discordTools = require('./lib/discord/ai-tools');
         if (discordTools && typeof discordTools.buildToolDefs === 'function') {
           const defs = discordTools.buildToolDefs(global.__discord_client || null);
           if (Array.isArray(defs)) for (const d of defs) tools.push(d);
           console.log('[tool-registry] discord_* tools added:', defs.length, defs.map(d => d.name).join(','));
         }
       } catch (e) {
-        // non-fatal; discord tools optional at startup
+        console.error('[tool-registry:main] discord require FAILED:', e && e.message);
       }
 
       if (tools.length > 0) {
@@ -3579,4 +3579,3 @@ ipcMain.handle('dream:reset', async () => {
     }
   });
 }
-
