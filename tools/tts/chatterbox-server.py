@@ -41,23 +41,26 @@ log.info("Loading Chatterbox model (device=%s model=%s)...", device, args.model)
 sys.stdout.flush()
 t0 = time.time()
 
-model = None
-sample_rate = 24000
+    model = None
+    sample_rate = 24000
 
-if args.model == "turbo":
-    from chatterbox.tts_turbo import ChatterboxTurboTTS
-    model = ChatterboxTurboTTS.from_pretrained(device=device)
-    sample_rate = getattr(model, "sr", 24000)
-    log.info("Chatterbox-Turbo loaded in %.1fs, sr=%d", time.time() - t0, sample_rate)
-else:
+    # Prefer full Chatterbox model for expressive/emotional range
     try:
         from chatterbox.tts import ChatterboxTTS
-    except ImportError:
-        log.error("Could not import ChatterboxTTS. Is chatterbox-tts installed?")
-        log.error("Run: pip install -r tools/tts/requirements.txt")
-        sys.exit(1)
-    model = ChatterboxTTS.from_pretrained(device=device)
-    log.info("Chatterbox loaded in %.1fs", time.time() - t0)
+        model = ChatterboxTTS.from_pretrained(device=device)
+        sample_rate = getattr(model, "sr", getattr(model, "sample_rate", 24000))
+        log.info("Chatterbox (full) loaded in %.1fs, sr=%d", time.time() - t0, sample_rate)
+    except Exception:
+        # Fallback: try turbo variant if available
+        try:
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+            model = ChatterboxTurboTTS.from_pretrained(device=device)
+            sample_rate = getattr(model, "sr", 24000)
+            log.info("Chatterbox-Turbo loaded in %.1fs, sr=%d", time.time() - t0, sample_rate)
+        except Exception as e:
+            log.error("Could not load any Chatterbox TTS implementation: %s", str(e))
+            log.error("Run: pip install -r tools/tts/requirements.txt")
+            sys.exit(1)
 
 model_sample_rate = getattr(model, "sr", getattr(model, "sample_rate", 24000))
 log.info("Model sample rate: %d", model_sample_rate)
