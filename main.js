@@ -128,7 +128,7 @@ const {
   ALLOWED_ADMIN_EMAIL,
 } = require("./auth-store");
 const { initAutoUpdate, registerAutoUpdateIpc } = require("./auto-update");
-const { createVoiceAgentService, VOICE_SYSTEM_PROMPT } = require("./lib/voice-agent");
+const { createVoiceAgentService, VOICE_SYSTEM_PROMPT, detectSpeaker } = require("./lib/voice-agent");
 const { NotionApi } = require("./lib/notion-api");
 const { ensureWhisperServer } = require("./lib/voice-agent/whisper-server");
 const { cudaRuntimeLikelyAvailable } = require("./lib/voice/cuda-check");
@@ -139,11 +139,13 @@ const {
 } = require("./lib/voice-env-resolve");
 const voiceMemory = require("./lib/supabase/voice-memory");
 const pageMemory = require("./lib/supabase/page-memory");
+const voiceProfiles = require("./lib/supabase/voice-profiles");
 const retrievalPipeline = require("./lib/retrieval-pipeline");
 const distillation = require("./lib/distillation");
 const searchTools = require("./lib/search");
 const { embed } = require("./lib/embeddings");
 const { extractAndStore: extractFacts } = require("./lib/voice-agent/fact-extractor");
+const discordBot = require("./lib/discord/index");
 
 let mainWindow = null;
 /** @type {NotionApi | null} */
@@ -156,9 +158,12 @@ const DEV_LOG_MAX = 500;
 const _origConsoleLog = console.log;
 const _origConsoleWarn = console.warn;
 const _origConsoleError = console.error;
+const { sanitizeArgs } = require('./lib/log/sanitize');
+let _lastKnownSpeaker = null;
+let _voiceAgent = null;
 
 console.log = (...args) => {
-  const text = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  const text = sanitizeArgs(args);
   devLogBuffer.push({ level: 'log', text, ts: Date.now() });
   if (devLogBuffer.length > DEV_LOG_MAX) devLogBuffer.shift();
   const w = getMainBrowserWindow();
@@ -169,7 +174,7 @@ console.log = (...args) => {
 };
 
 console.warn = (...args) => {
-  const text = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  const text = sanitizeArgs(args);
   devLogBuffer.push({ level: 'warn', text, ts: Date.now() });
   if (devLogBuffer.length > DEV_LOG_MAX) devLogBuffer.shift();
   const w = getMainBrowserWindow();
@@ -180,7 +185,7 @@ console.warn = (...args) => {
 };
 
 console.error = (...args) => {
-  const text = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  const text = sanitizeArgs(args);
   devLogBuffer.push({ level: 'error', text, ts: Date.now() });
   if (devLogBuffer.length > DEV_LOG_MAX) devLogBuffer.shift();
   const w = getMainBrowserWindow();
@@ -191,21 +196,24 @@ console.error = (...args) => {
 };
 
 function getVoiceAgent() {
-  loadDotenv();
-  applyVoiceEnvPaths(__dirname);
-  const voicePaths = resolveVoiceEnvPaths(__dirname, {
-    whisperBin: process.env.RME_WHISPER_BIN,
-    whisperModel: process.env.RME_WHISPER_MODEL,
-    ffmpegBin: process.env.RME_FFMPEG_BIN,
-  });
-  return createVoiceAgentService({
-    ...voicePaths,
-    anthropicKey: process.env.ANTHROPIC_API_KEY,
-    anthropicModel: process.env.ANTHROPIC_MODEL,
-    anthropicModelFast: process.env.RME_ANTHROPIC_MODEL_FAST,
-    claudePromptCache: process.env.RME_CLAUDE_PROMPT_CACHE !== "0",
-    persistAudioPath: path.join(app.getPath("userData"), "rme-voice-last.wav"),
-  });
+	if (!_voiceAgent) {
+		loadDotenv();
+		applyVoiceEnvPaths(__dirname);
+		const voicePaths = resolveVoiceEnvPaths(__dirname, {
+			whisperBin: process.env.RME_WHISPER_BIN,
+			whisperModel: process.env.RME_WHISPER_MODEL,
+			ffmpegBin: process.env.RME_FFMPEG_BIN,
+		});
+		_voiceAgent = createVoiceAgentService({
+			...voicePaths,
+			anthropicKey: process.env.ANTHROPIC_API_KEY,
+			anthropicModel: process.env.ANTHROPIC_MODEL,
+			anthropicModelFast: process.env.RME_ANTHROPIC_MODEL_FAST,
+			claudePromptCache: process.env.RME_CLAUDE_PROMPT_CACHE !== "0",
+			persistAudioPath: path.join(app.getPath("userData"), "rme-voice-last.wav"),
+		});
+	}
+	return _voiceAgent;
 }
 
 /** @param {unknown} payload */
@@ -512,7 +520,8 @@ async function queryDataSourceAllPages(token, dataSourceId) {
         message +=
           "\n\nFix checklist:\n" +
           "• Use an Internal integration: Notion integrations page → New integration → type Internal. Copy the full secret (one line, no spaces).\n" +
-          "• If the integration is Public (OAuth), the \"client secret\" is not the API key — this app expects the internal secret only, unless you add OAuth.\n" +
+          "- The OAuth bot invite URL only needs client_id, scope, and permissions.\n" +
+          "No secret of any kind is required for this URL — never include one.\n" +
           "• After pasting, save .env and restart the app. Try \"Refresh secret\" in Notion if this key was ever shared.";
       }
       const err = new Error(message);
@@ -2063,7 +2072,9 @@ if (!gotTheLock) {
     seedPackagedEnvTemplate(userDataPath);
     loadDotenv();
     applyVoiceEnvPaths(__dirname);
-    void getVoiceAgent().warmVoiceStack().catch((e) => {
+    void getVoiceAgent().warmVoiceStack().then(() => {
+      console.log("[voice] Voice stack fully warmed (TTS + Whisper).");
+    }).catch((e) => {
       console.warn(
         `[voice] background warm failed: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -2079,6 +2090,21 @@ if (!gotTheLock) {
       svc._notionApi = notionApi;
       svc.setUserEmail(ALLOWED_ADMIN_EMAIL);
     })();
+
+    /* Load persisted voice preference */
+    try {
+      const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
+      if (fs.existsSync(voiceConfigPath)) {
+        const raw = fs.readFileSync(voiceConfigPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.voice === "string" && parsed.voice.trim()) {
+          const { setVoice } = require("./lib/tts/index");
+          if (typeof setVoice === "function") setVoice(parsed.voice.trim());
+        }
+      }
+    } catch (e) {
+      /* ignore corrupt file */
+    }
 
     log.info("notion", { tokenSet: !!process.env.NOTION_TOKEN, status: "ready" });
 
@@ -2517,6 +2543,7 @@ if (!gotTheLock) {
           /* WebContents may refuse during teardown */
         }
       }
+      console.log("[voice] Sign-out — quitting app (will-quit will shut down voice stack)...");
       app.quit();
       return { ok: true };
     });
@@ -2837,17 +2864,173 @@ if (!gotTheLock) {
         };
       }
     });
-    ipcMain.handle("voice:transcribe", async (_evt, payload) => {
-      const buf = voicePayloadToBuffer(payload);
-      const mimeType =
-        payload && typeof payload === "object" && typeof payload.mimeType === "string"
-          ? payload.mimeType
-          : "audio/webm";
-      if (!buf || !buf.length) {
-        return { ok: false, error: "No audio data received." };
-      }
-      return getVoiceAgent().transcribe(buf, mimeType);
-    });
+    // Dream cycle runtime state
+let _lastDreamCycleFiredAt = 0;
+const DREAM_DEBOUNCE_MS = 90000; // 90s
+const DREAM_INACTIVITY_TIMEOUT_MS = Number(process.env.DREAM_INACTIVITY_TIMEOUT_MS || 30 * 60 * 1000);
+let _activeDream = null; // { sessionId, filePath, startedAt, speakerId, triggerPhrase, inactivityTimer, factsBeforeCount }
+
+const DREAM_START_PATTERNS = [
+	/start (the )?dream cycle/i,
+	/start dreaming/i,
+	/begin (the )?dream cycle/i,
+	/begin dreaming/i,
+	/run (the )?dream cycle/i,
+	/let'?s (start (the )?)?dream( cycle)?/i,
+	/let'?s (start )?dreaming/i,
+];
+const DREAM_END_PATTERNS = [
+	/end (the )?dream cycle/i,
+	/finish (the )?dream cycle/i,
+	/stop dreaming/i,
+	/we'?re done( with the dream( cycle)?)?/i,
+];
+
+function dreamDir() {
+	return path.join(app.getPath('userData'), 'dream-sessions');
+}
+function sessionFilePath(startedAtIso) {
+	const safe = startedAtIso.replace(/:/g, '-');
+	return path.join(dreamDir(), `dream-session-${safe}.json`);
+}
+
+async function startDreamSession(matchedSubstring, speakerId, triggerPhrase) {
+	try {
+		const sessionId = crypto.randomUUID();
+		const startedAt = new Date().toISOString();
+		const lf = await voiceMemory.listFacts({ userEmail: 'inforecruitmyenglish@gmail.com' });
+		const factsBefore = lf && lf.ok && Array.isArray(lf.data) ? lf.data : [];
+		const factsBeforeCount = factsBefore.length;
+		const doc = {
+			sessionId,
+			startedAt,
+			triggeredBy: speakerId || 'unknown',
+			triggerPhrase: matchedSubstring || triggerPhrase || null,
+			factsBeforeCount,
+			factsBefore,
+			status: 'in_progress',
+		};
+		try { fs.mkdirSync(dreamDir(), { recursive: true }); } catch {}
+		const filePath = sessionFilePath(startedAt);
+		try { fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), 'utf8'); } catch (e) { console.error('[dream] write start file failed', e); }
+		_activeDream = { sessionId, filePath, startedAt, speakerId, triggerPhrase: doc.triggerPhrase, inactivityTimer: null, factsBeforeCount };
+		voiceMemory.enableDreamMode(true, sessionId);
+		console.log(` Dream session started: ${sessionId} by ${speakerId} → ${filePath}`);
+		if (_activeDream.inactivityTimer) clearTimeout(_activeDream.inactivityTimer);
+		_activeDream.inactivityTimer = setTimeout(() => {
+			endDreamSession('inactivity', null).catch(e => console.error('[dream] end error', e));
+		}, DREAM_INACTIVITY_TIMEOUT_MS);
+	} catch (e) {
+		console.error('[dream] start error', e);
+	}
+}
+
+async function endDreamSession(endReason = 'phrase', endPhrase = null) {
+	if (!_activeDream) return;
+	const { sessionId, filePath, startedAt, speakerId } = _activeDream;
+	if (_activeDream.inactivityTimer) { clearTimeout(_activeDream.inactivityTimer); _activeDream.inactivityTimer = null; }
+	try {
+		const factsAfterRes = await voiceMemory.listFacts({ userEmail: 'inforecruitmyenglish@gmail.com' });
+		const factsAfter = factsAfterRes && factsAfterRes.ok && Array.isArray(factsAfterRes.data) ? factsAfterRes.data : [];
+		const factsAfterCount = factsAfter.length;
+		const ops = voiceMemory.getDreamOps();
+		const inserted = ops.filter(o => o.op === 'store' && (o.before == null)).length;
+		const contradictions = ops.filter(o => o.op === 'store' && o.before != null && o.before !== o.after).length;
+		const merged = ops.filter(o => o.op === 'store' && o.before != null && o.before === o.after).length;
+		const deleted = ops.filter(o => o.op === 'delete').length;
+		const summary = `${inserted} inserted, ${merged} merged, ${deleted} deleted, ${contradictions} contradictions`;
+		const finalDoc = {
+			sessionId,
+			startedAt,
+			endedAt: new Date().toISOString(),
+			endReason,
+			endPhrase: endPhrase || null,
+			triggeredBy: speakerId || 'unknown',
+			triggerPhrase: _activeDream.triggerPhrase || null,
+			factsBeforeCount: _activeDream.factsBeforeCount,
+			factsAfterCount,
+			factsBefore: null,
+			factsAfter,
+			dreamOps: ops,
+			summary,
+			status: 'complete',
+		};
+		// attempt to read existing start file to include factsBefore if present
+		try {
+			if (fs.existsSync(filePath)) {
+				const raw = fs.readFileSync(filePath, 'utf8');
+				try { const parsed = JSON.parse(raw); if (parsed && parsed.factsBefore) finalDoc.factsBefore = parsed.factsBefore; }
+				catch {}
+			}
+		} catch {}
+		try { fs.writeFileSync(filePath, JSON.stringify(finalDoc, null, 2), 'utf8'); } catch (e) { console.error('[dream] write end file failed', e); }
+		console.log(` Dream session ended: ${sessionId}, reason: ${endReason}, ops: ${ops.length} → ${filePath}`);
+	} catch (e) {
+		console.error('[dream] end error', e);
+	} finally {
+		voiceMemory.enableDreamMode(false);
+		voiceMemory.clearDreamOps();
+		_activeDream = null;
+	}
+}
+
+ipcMain.handle("voice:transcribe", async (_evt, payload) => {
+	const buf = voicePayloadToBuffer(payload);
+	const mimeType =
+		payload && typeof payload === "object" && typeof payload.mimeType === "string"
+			? payload.mimeType
+			: "audio/webm";
+	if (!buf || !buf.length) {
+		return { ok: false, error: "No audio data received." };
+	}
+	const result = await getVoiceAgent().transcribe(buf, mimeType);
+	try {
+		const text = result && result.ok && typeof result.text === "string" ? result.text : null;
+		if (text) {
+			const t = String(text || "");
+			const speakerId = detectSpeaker(t) || _lastKnownSpeaker || 'unknown';
+			const now = Date.now();
+			// detect start
+			for (const re of DREAM_START_PATTERNS) {
+				const m = t.match(re);
+				if (m) {
+					if (now - _lastDreamCycleFiredAt < DREAM_DEBOUNCE_MS) {
+						console.log('[dream] trigger ignored due to debounce');
+						break;
+					}
+					_lastDreamCycleFiredAt = now;
+					const matched = m[0];
+					await startDreamSession(matched, speakerId, matched);
+					break;
+				}
+			}
+			// detect end
+			if (_activeDream) {
+				for (const re of DREAM_END_PATTERNS) {
+					const m = t.match(re);
+					if (m) {
+						await endDreamSession('phrase', m[0]);
+						break;
+					}
+				}
+			}
+		}
+	} catch (e) {
+		console.error('[dream] detection error', e);
+	}
+	return result;
+});
+
+ipcMain.handle('dream:reset', async () => {
+	const wasActive = Boolean(_activeDream);
+	if (_activeDream) {
+		try { await endDreamSession('manual_reset', null); } catch (e) { console.error('[dream] reset end error', e); }
+	}
+	voiceMemory.clearDreamOps();
+	voiceMemory.enableDreamMode(false);
+	console.log(' Dream mode manually reset');
+	return { reset: true, wasActive };
+});
     ipcMain.handle("voice:ask-claude", async (evt, payload) => {
       const p =
         payload && typeof payload === "object" && !Array.isArray(payload)
@@ -2890,6 +3073,28 @@ if (!gotTheLock) {
       }, null);
 
       const contextBlocks = [];
+
+      /* --- Speaker detection: identify Ayaaz or Yushra from their self-introduction --- */
+      let detectedSpeaker = null;
+      if (lastUserMsg) {
+        detectedSpeaker = detectSpeaker(lastUserMsg);
+        /* Fall back to last known speaker, or Ayaaz on first turn */
+        if (!detectedSpeaker) detectedSpeaker = _lastKnownSpeaker || "ayaaz";
+        const profileResult = await voiceProfiles.getProfile({ userEmail: ALLOWED_ADMIN_EMAIL, name: detectedSpeaker });
+        if (profileResult.ok && profileResult.data) {
+          const p = profileResult.data;
+          contextBlocks.push(
+            "## Current user (this is who is speaking RIGHT NOW — OVERRIDES any stored facts about identity, greetings, or addressing)\n" +
+            `- Name: ${p.display_name}\n` +
+            `- Role: ${p.title}\n` +
+            `- About: ${p.bio || "No bio"}\n` +
+            `- Suggestions for today: ${p.suggestions || "None"}\n` +
+            `- Tone: ${p.tone || "Direct"}`
+          );
+          log.info("voice-profiles", { speaker: detectedSpeaker, display: p.display_name, cid });
+        }
+        _lastKnownSpeaker = detectedSpeaker;
+      }
 
       if (lastUserMsg) {
         const retrievalResult = await Promise.race([
@@ -2940,10 +3145,19 @@ if (!gotTheLock) {
 
       /* Fallback: always include recent facts and page refs even without a user query */
       const [factsFallback, refsFallback] = await Promise.all([
-        voiceMemory.listFacts({ userEmail: ALLOWED_ADMIN_EMAIL }),
+        voiceMemory.listFacts({ userEmail: ALLOWED_ADMIN_EMAIL, userName: detectedSpeaker }),
         pageMemory.listPageRefs({ userEmail: ALLOWED_ADMIN_EMAIL }),
       ]);
-      const fallbackFacts = (factsFallback.ok ? factsFallback.data : []).slice(0, 30);
+      let fallbackFacts = (factsFallback.ok ? factsFallback.data : []).slice(0, 30);
+      /* If a speaker was detected, exclude stored facts that conflict with the Current user profile */
+      if (detectedSpeaker) {
+        const CONFLICT_KEYS = /^(greeting|address(ing)?|speaker_identity|current_speaker|who_is_speaking)/i;
+        const before = fallbackFacts.length;
+        fallbackFacts = fallbackFacts.filter(f => !CONFLICT_KEYS.test(f.fact_key));
+        if (fallbackFacts.length !== before) {
+          log.info("memory", { filteredConflictingFacts: before - fallbackFacts.length, cid });
+        }
+      }
       const fallbackRefs = (refsFallback.ok ? refsFallback.data : []).slice(0, 30);
 
       if (fallbackFacts.length > 0) {
@@ -2964,6 +3178,7 @@ if (!gotTheLock) {
       /* --- Recent conversation history from Supabase (persistent context across sessions) --- */
       const convResult = await voiceMemory.getRecentConversations({
         userEmail: ALLOWED_ADMIN_EMAIL,
+        userName: detectedSpeaker,
         limit: 100,
       });
       if (convResult.ok && Array.isArray(convResult.data) && convResult.data.length > 0) {
@@ -2984,7 +3199,7 @@ if (!gotTheLock) {
       if (Array.isArray(toolDefs)) {
         for (const t of toolDefs) tools.push(t);
       }
-      /* Memory tools — always available (no MCP dependency) */
+      /* Memory tools — always available */
       tools.push(
         {
           name: "memory_store_fact",
@@ -3033,6 +3248,18 @@ if (!gotTheLock) {
         for (const t of searchDefs) tools.push(t);
       }
 
+      /* Discord tools — always register definitions; handler routes via onToolCall */
+      try {
+        const discordTools = require('./lib/discord/ai-tools');
+        if (discordTools && typeof discordTools.buildToolDefs === 'function') {
+          const defs = discordTools.buildToolDefs(global.__discord_client || null);
+          if (Array.isArray(defs)) for (const d of defs) tools.push(d);
+          console.log('[tool-registry] discord_* tools added:', defs.length, defs.map(d => d.name).join(','));
+        }
+      } catch (e) {
+        console.error('[tool-registry:main] discord require FAILED:', e && e.message);
+      }
+
       if (tools.length > 0) {
         log.info("memory", { toolsCount: tools.length, toolNames: tools.map(t => t.name).join(","), cid });
       }
@@ -3044,7 +3271,17 @@ if (!gotTheLock) {
           return { ok: false, error: { code: "INVALID_TOOL_CALL", message: "No tool name", cid } };
         }
 
-        /* --- Memory tools handled locally (no MCP needed) --- */
+        /* --- Discord tools --- */
+        if (typeof tName === 'string' && tName.startsWith('discord_')) {
+          const discordTools = require('./lib/discord/ai-tools');
+          if (discordTools && typeof discordTools.callTool === 'function') {
+            console.log('[ai-chat] dispatching discord tool:', tName);
+            return await discordTools.callTool(global.__discord_client || null, tName, tInput);
+          }
+          return { ok: false, error: { code: 'DISCORD_NOT_FOUND', message: 'Discord tools module not loaded.' } };
+        }
+
+        /* --- Memory tools handled locally --- */
         if (tName === "memory_store_fact") {
           const key = typeof tInput.key === "string" ? tInput.key.trim() : "";
           const value = typeof tInput.value === "string" ? tInput.value.trim() : "";
@@ -3133,6 +3370,7 @@ if (!gotTheLock) {
       const turnResult = await getVoiceAgent().runAssistantTurn({
         messages,
         system: systemText,
+        speaker: detectedSpeaker || _lastKnownSpeaker || null,
         maxTokens: typeof p.maxTokens === "number" ? p.maxTokens : undefined,
         tools: tools.length > 0 ? tools : undefined,
         onToolCall,
@@ -3163,16 +3401,47 @@ if (!gotTheLock) {
 
       /* --- Fire-and-forget: store conversation turns --- */
       if (lastUserMsg) {
-        voiceMemory.storeTurn({ userEmail: ALLOWED_ADMIN_EMAIL, role: "user", content: lastUserMsg, cid }).catch(() => {});
+        voiceMemory.storeTurn({ userEmail: ALLOWED_ADMIN_EMAIL, role: "user", content: lastUserMsg, cid, userName: detectedSpeaker }).catch(() => {});
       }
       if (turnResult && turnResult.ok && turnResult.text) {
-        voiceMemory.storeTurn({ userEmail: ALLOWED_ADMIN_EMAIL, role: "assistant", content: turnResult.text, cid }).catch(() => {});
+        voiceMemory.storeTurn({ userEmail: ALLOWED_ADMIN_EMAIL, role: "assistant", content: turnResult.text, cid, userName: detectedSpeaker }).catch(() => {});
         /* Phase 2 stub: fact extraction runs after turn, doesn't block */
         extractFacts({ userMessage: lastUserMsg, assistantReply: turnResult.text, userEmail: ALLOWED_ADMIN_EMAIL, cid }).catch(() => {});
         distillation.maybeDistill({ userEmail: ALLOWED_ADMIN_EMAIL, interval: 50 }).catch(() => {});
       }
 
       return turnResult;
+    });
+
+    /* --- Voice config IPC (preset selection, no restart needed) --- */
+    ipcMain.handle("voice:set-voice", async (_evt, payload) => {
+      const name = payload && typeof payload.name === "string" ? payload.name.trim() : "";
+      if (!name) return { ok: false, error: "Voice name required" };
+      const { setVoice } = require("./lib/tts/index");
+      if (typeof setVoice !== "function") return { ok: false, error: "TTS not initialized" };
+      setVoice(name);
+      const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
+      try {
+        fs.writeFileSync(voiceConfigPath, JSON.stringify({ voice: name }), "utf8");
+      } catch {}
+      console.log(`[voice] voice set to "${name}"`);
+      return { ok: true };
+    });
+    ipcMain.handle("voice:get-voice", () => {
+      const { getTtsVoice } = require("./lib/tts/index");
+      if (typeof getTtsVoice === "function") return { ok: true, voice: getTtsVoice() };
+      /* fallback: read from disk */
+      try {
+        const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
+        if (fs.existsSync(voiceConfigPath)) {
+          const raw = fs.readFileSync(voiceConfigPath, "utf8");
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.voice === "string" && parsed.voice.trim()) {
+            return { ok: true, voice: parsed.voice.trim() };
+          }
+        }
+      } catch {}
+      return { ok: true, voice: "aaron" };
     });
 
     /* --- Memory IPC handlers (admin-only) --- */
@@ -3218,7 +3487,7 @@ if (!gotTheLock) {
       return distillation.distillSession({ userEmail: ALLOWED_ADMIN_EMAIL, messageCount: 50 });
     });
 
-    /* AI Chat (non-voice) with MCP tools */
+    /* AI Chat (non-voice) */
     ipcMain.handle("ai:chat", async (_evt, payload) => {
       if (!adminGate()) return forbid();
       const p = payload && typeof payload === "object" ? payload : {};
@@ -3281,6 +3550,12 @@ if (!gotTheLock) {
     registerAutoUpdateIpc(ipcMain);
     createWindow();
     initAutoUpdate(() => mainWindow);
+    // Start Discord bot if configured
+    try {
+      discordBot.start().catch((e) => console.warn('[discord] start failed', e));
+    } catch (e) {
+      console.warn('[discord] require/start failed', e);
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -3290,7 +3565,12 @@ if (!gotTheLock) {
   });
 
   app.on("will-quit", () => {
-    try { getVoiceAgent().shutdownVoiceStack(); } catch {}
+    console.log("[voice] will-quit — shutting down voice stack...");
+    try { getVoiceAgent().shutdownVoiceStack(); } catch (e) {
+      console.warn("[voice] shutdownVoiceStack error:", e);
+    }
+    console.log("[voice] Voice stack shut down.");
+    try { discordBot.stop().catch(() => {}); } catch {}
   });
 
   app.on("window-all-closed", () => {
@@ -3299,10 +3579,3 @@ if (!gotTheLock) {
     }
   });
 }
-
-
-
-
-
-
-

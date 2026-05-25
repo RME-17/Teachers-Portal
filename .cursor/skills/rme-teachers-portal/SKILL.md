@@ -21,22 +21,25 @@ Ship the smallest correct diff that solves the request. No drive-by refactors. N
 1. The RME Notion Blueprint ("Operations Audit & Automation Blueprint — May 2026") wins on business logic.
 2. The Notion page "Skill — Teachers Portal Coding" wins on engineering detail for this repo.
 3. This `.cursorrules` file wins on Cursor-specific behaviour.
+
 If you are unsure where a rule lives, ask the human before editing.
 
 # Stack you are working in
 - Electron app, three processes:
-  - `main.js` — Node, privileged. Owns secrets, filesystem, network, PDF generation, all third-party SDK calls.
+  - `main.js` — Node, privileged. Owns secrets, filesystem, network, PDF generation, all third-party SDK calls, and the Chatterbox + Whisper sidecar lifecycles.
   - `preload.js` — the ONLY bridge. `contextBridge.exposeInMainWorld` with a narrow, typed API. No business logic.
   - `renderer.js` — browser-safe UI. Talks to main exclusively via the preload bridge.
 - Modern JS (ES2022+). Node 20+. Electron ^34. No transpile-down.
 - Supabase auth + Notion REST for data. PDFs via in-repo builders.
+- Voice stack: **Whisper** (STT) + **Chatterbox** (TTS, open source, Resemble AI). Both run as local sidecar processes managed by `main.js`. The renderer NEVER speaks to them directly — it goes through IPC.
 - 2-space? NO — this repo uses TABS for indentation in `renderer.js` / `main.js`. Match the file you're editing.
 
 # Find code fast (TOP PRIORITY — the #1 user complaint is slow lookups)
 Stop at the first step that produces a confident hit.
+
 1. Map the symbol to ONE file by category before opening anything:
-   - DOM IDs, IIFE patches, UI behaviour, dashboard cards → `renderer.js`
-   - IPC handlers, Electron lifecycle, filesystem, Notion REST, PDF dialog, single-instance lock → `main.js`
+   - DOM IDs, IIFE patches, UI behaviour, dashboard cards, voice orb → `renderer.js`
+   - IPC handlers, Electron lifecycle, filesystem, Notion REST, PDF dialog, single-instance lock, sidecar spawn/kill → `main.js`
    - `window.*` bridges, `contextBridge.exposeInMainWorld`, Supabase lazy client → `preload.js`
    - Admin allowlist + `hasAdmin()` → `auth-store.js`
    - HTML structure, auth gate DOM, nav DOM → `index.html`
@@ -44,24 +47,36 @@ Stop at the first step that produces a confident hit.
    - Notion response shaping → `notion-simplify.js`
    - DB schema → `Supabase/migrations`
    - Build/run config → `package.json`, `.env`, `Scripts`
+   - Chatterbox TTS client / sentence pipeline / chunking → `lib/tts/*`
+   - Whisper STT client + sidecar manager → `lib/voice-agent/whisper-server.js`
+   - Chatterbox sidecar manager (Python process lifecycle) → `lib/voice-agent/chatterbox-server.js`
+   - Voice routing, Claude turn, sentence buffer → `lib/voice-agent.js`, `lib/voice/*`
+
 2. Use Cursor's `@codebase`, `@files`, `@folders`, and `@web` to point the model at the exact slice you need. Don't dump the whole repo into context.
-3. Anchor on a token that exists in exactly ONE place — IIFE name (`rmeAdminFileBackedAutoSignIn`), DOM ID (`#authPassword`), IPC channel (`payslip:save-pdf`), bridge surface (`window.adminCredsApi`), localStorage key (`recruit-auth-remember-me`), Supabase table, or a distinctive string literal. NEVER search for `function`, `const`, `return`, or generic words.
-4. Translate the user's words to the code's words before searching: "remember me" → `recruit-auth-remember-me`; "restart button" → `#navRestartAppBtn` / `app:relaunch`; "password box" → `#authPassword`; "bottom card" → `rmeForceBottomDashboardCardsFromVaultTeacherSource`; "payslips page" → `rmeWireTpsToInAppTeachersPage`.
+
+3. Anchor on a token that exists in exactly ONE place — IIFE name (`rmeAdminFileBackedAutoSignIn`), DOM ID (`#authPassword`), IPC channel (`payslip:save-pdf`, `voice:speak`, `voice:assistant-turn`), bridge surface (`window.adminCredsApi`, `window.voiceApi`), localStorage key (`recruit-auth-remember-me`), Supabase table, env var (`RME_CHATTERBOX_VOICE`), or a distinctive string literal. NEVER search for `function`, `const`, `return`, or generic words.
+
+4. Translate the user's words to the code's words before searching: "remember me" → `recruit-auth-remember-me`; "restart button" → `#navRestartAppBtn` / `app:relaunch`; "password box" → `#authPassword`; "bottom card" → `rmeForceBottomDashboardCardsFromVaultTeacherSource`; "payslips page" → `rmeWireTpsToInAppTeachersPage`; "voice orb" → renderer orb IIFE; "the voice" / "the speaker" → `lib/tts/chatterbox.js`; "Python crashed" / "TTS not loading" → `lib/voice-agent/chatterbox-server.js`.
+
 5. Cache symbol → file → region across the session. Don't re-grep the file just to relocate the same anchor.
+
 6. If the symbol still won't appear: re-check the file pick, open a sibling file, ASK the user. Never guess.
 
 # Edit precisely — or don't edit (TOP PRIORITY)
 Cursor's apply step replaces ranges literally. One missing tab or smart-quote breaks the edit.
+
 Pre-flight:
 - Read the target file end-to-end before editing. Read its direct importers and importees too. Never edit blind.
 - Copy the anchor lines verbatim from the live file. Do not retype. Do not reformat. Do not collapse whitespace.
 - TABS, not spaces, in `renderer.js` / `main.js` / `preload.js`.
 - Smallest unique anchor — 3–8 lines containing at least one distinctive token. Single-line anchors collide.
 - Predict the post-edit file in your head. Does it still parse? Did you orphan a brace?
+
 The edit:
 - One logical change per diff. Never bundle unrelated fixes.
 - Never reformat lines you didn't need to touch.
 - Never reorder imports, exports, or top-level declarations as a side effect.
+
 Post-flight:
 - Re-read the diff Cursor is about to apply. If it touches anything outside the anchor region, reject it.
 - For renderer IIFE edits: new name doesn't collide with the existing IIFE list; insertion is BEFORE `function toggleTheme() {`; any superseded IIFE was neutralized with `return;` in the SAME edit.
@@ -74,9 +89,10 @@ Post-flight:
 - Never expose tokens, service-role keys, or env values to the renderer.
 - `shell.openExternal` only with validated `https:` URLs. Never pass renderer input straight to `child_process`.
 - Admin-only IPC handlers (`admin-creds:*`) MUST gate by `ALLOWED_ADMIN_EMAIL` on every call.
+- Sidecar processes (Whisper, Chatterbox) bind to `127.0.0.1` only. Never expose their ports to anything but the local main process. Validate every payload before forwarding to the renderer.
 
 # IPC contract
-- Channel naming: `domain:action` (e.g. `payslip:save-pdf`).
+- Channel naming: `domain:action` (e.g. `payslip:save-pdf`, `voice:speak`, `voice:assistant-turn`, `voice:warm-tts`).
 - Every handler returns `{ ok: true, data } | { ok: false, error: { code, message, details? } }`. Never throw across IPC.
 - Renderer surfaces errors through one toast/log channel. Never `alert()` raw error text.
 - Preload exposes typed wrappers. No generic `invoke(channel, args)` for the renderer.
@@ -100,11 +116,32 @@ Post-flight:
 - Main uses service-role only when strictly necessary; every service-role query filters by the verified session user.
 - Never trust an ID coming from the renderer. Re-verify against `auth.getUser()` in main.
 
+# Voice stack — Chatterbox (TTS) + Whisper (STT)
+Kokoro is GONE. Do not reintroduce `kokoro-js`, `RME_KOKORO_*`, or any Kokoro reference. If you see one in the diff, delete it.
+
+Chatterbox runtime:
+- Open-source Chatterbox TTS (Resemble AI) runs as a **Python sidecar** spawned by `main.js` on app boot, managed by `lib/voice-agent/chatterbox-server.js` (mirrors the `whisper-server.js` lifecycle pattern).
+- The sidecar exposes a local HTTP endpoint on `127.0.0.1:<port>` for synthesis. The Node-side client `lib/tts/chatterbox.js` is the ONLY caller.
+- Env vars live under `RME_CHATTERBOX_*` (model path, voice / reference audio, device, speed, exaggeration, cfg weight, port). Defaults belong in `.env.example` and the setup script.
+- Setup script: `scripts/setup-chatterbox.ps1` provisions the Python venv and installs `chatterbox-tts`.
+
+Voice pipeline rules:
+- The renderer NEVER calls the Python sidecar directly. It goes through `window.voiceApi.*` → IPC → main → sidecar.
+- Sentence-streaming TTS: pull complete sentences from the Claude SSE stream (`lib/voice/sentence-buffer.js`), synth each one, stream the audio back to the renderer in order.
+- Warm the sidecar on app boot (`voice:warm-tts`). First-token latency matters more than peak quality.
+- Cache short canned utterances (e.g. acknowledgement audio) to disk so they're effectively instant after warm.
+- Long replies: chunk in JS (`lib/tts/chunk.js`) on sentence / clause boundaries. Hand each chunk to Chatterbox separately, then crossfade-join in JS if the chunk count > 1.
+- Stats line (chunks, bytes, durationMs, firstSynthMs, GPU badge) flows back through IPC for the voice dashboard.
+- If the sidecar dies, `chatterbox-server.js` restarts it with backoff. The renderer shows a friendly "voice offline" status — never a stack trace.
+
+GPU / device:
+- Chatterbox runs CUDA when available, falls back to CPU. `RME_CHATTERBOX_DEVICE=auto|cuda|cpu`. Surface the resolved device as a status badge.
+
 # Error handling & observability
 - Central logger in `lib/log.js`: `log.info | log.warn | log.error` with a redaction list for secrets and PII (emails, phones, tokens).
 - Tag every log line with a correlation id (`crypto.randomUUID()`) generated at the IPC boundary.
 - Renderer shows a friendly message plus the correlation id; main keeps the stack trace.
-- Map known SDK errors to internal codes: `NOT_FOUND`, `RATE_LIMITED`, `BAD_INPUT`, `UPSTREAM`, `INTERNAL`.
+- Map known SDK errors to internal codes: `NOT_FOUND`, `RATE_LIMITED`, `BAD_INPUT`, `UPSTREAM`, `INTERNAL`, `VOICE_SIDECAR_DOWN`, `TTS_SYNTH_FAILED`.
 - Never swallow errors silently. `catch (e) {}` is a defect.
 
 # Performance
@@ -113,12 +150,13 @@ Post-flight:
 - Batch IPC reads — one `getMany` beats N `getOne`s.
 - `requestIdleCallback` for non-critical UI work. Never block the renderer main thread.
 - For PDF generation: stream to disk, don't buffer.
+- For TTS: synth small chunks early, play first chunk while remaining chunks synth. Never block on a full reply.
 
 # Code style
 - `const` by default, `let` only when reassignment is real.
 - Single quotes, trailing commas, semicolons where the file already has them.
-- One concern per file. `lib/notion/payslips.js` ≠ `lib/notion/teachers.js`.
-- Comments explain *why*, not *what*.
+- One concern per file. `lib/notion/payslips.js` ≠ `lib/notion/teachers.js`. `lib/tts/chatterbox.js` ≠ `lib/voice-agent/chatterbox-server.js`.
+- Comments explain **why**, not **what**.
 - JSDoc public functions with `@param` / `@returns`.
 - Guard-clause early returns; avoid deep nesting.
 
@@ -127,10 +165,9 @@ Post-flight:
 - **Composer**: for focused, multi-file refactors. Always attach `@codebase` or specific files; never let it guess.
 - **Tab autocomplete**: accept only when the suggestion matches your mental model. Reject and retype rather than fight a wrong completion.
 - **Inline edit (Cmd/Ctrl+K)**: best for surgical changes in one file. Always re-read the diff before accepting.
-- **`@docs`**: pin Electron, Supabase, Notion SDK, and pdfkit docs so the model stops hallucinating APIs.
+- **`@docs`**: pin Electron, Supabase, Notion SDK, pdfkit, and Chatterbox docs so the model stops hallucinating APIs.
 - **`@git`**: use for "what changed since main" reviews before opening a PR.
 - **`@web`**: only when the answer isn't in the repo or pinned docs.
-- **MCP servers**: if a Notion or Supabase MCP is configured, prefer it over hand-written REST calls for one-off scripts.
 - **Notepads / Rules for AI**: keep this file as the single source. Don't duplicate rules into per-folder `.cursorrules` unless a folder genuinely needs different rules.
 
 # Things you must NEVER do
@@ -144,11 +181,13 @@ Post-flight:
 - Never claim success before the tool/edit actually completed.
 - Never leave dead code, commented-out blocks, unused imports, or `console.log` debris in a shipped diff.
 - Never "clean up" code outside the scope of the requested change — flag it, don't touch it.
+- Never reintroduce Kokoro, `kokoro-js`, Piper, or any TTS engine other than Chatterbox without explicit founder approval.
+- Never let the renderer call the Chatterbox or Whisper sidecar directly. Everything goes through IPC.
 
 # Speed: search fast, edit fast
 The two #1 user complaints are slow lookups and slow/sloppy edits. Be fast on purpose.
 - Search budget: 1 query to land on the right file, 1 query to land on the right region. If you're past 3 searches without a confident hit, STOP and re-pick the file by category — you're searching wrong.
-- Never `grep` the whole repo for a generic word. Use unique tokens only (IIFE name, DOM ID, IPC channel, bridge surface, localStorage key, Supabase table, distinctive string literal).
+- Never `grep` the whole repo for a generic word. Use unique tokens only (IIFE name, DOM ID, IPC channel, bridge surface, localStorage key, Supabase table, env var, distinctive string literal).
 - Prefer `@file:path` over `@codebase` when you already know the file. Prefer `@symbol` over `@file` when you already know the symbol. Smaller context = faster, sharper edits.
 - Cache symbol → file → region across the turn. If you found it once this session, don't re-search.
 - Edit budget: one apply step per logical change. Don't ping-pong tiny edits. Batch related lines into one diff.
@@ -184,113 +223,37 @@ A change is only "done" when ALL of these are true:
 - [ ] Manual smoke run on at least one realistic record.
 - [ ] No new dependency without a one-line justification (license, size, maintenance).
 - [ ] No `console.log` debris.
+- [ ] No Kokoro / Piper references reintroduced.
+- [ ] Sidecar lifecycle (spawn + restart + kill on `will-quit`) verified if you touched it.
 - [ ] Change log entry appended to the Notion mirror for every file touched.
 
 # Code change log
-- `lib/tts/kokoro.js` — Added Kokoro-82M TTS via kokoro-js (`synthesize`, `kokoroFilesReady`, env `RME_KOKORO_*`).
-- `lib/voice-agent.js` — Replaced Piper with Kokoro `synthesize`; `voice:status` exposes `kokoroReady` / `kokoroModel` / `kokoroVoice`.
-- `lib/voice-env-resolve.js` — Removed Piper binary/voice path resolution (Whisper + ffmpeg only).
-- `main.js` — Stopped passing `RME_PIPER_*` into `createVoiceAgentService`.
-- `preload.js` — `voiceApi.speak` flattens IPC `{ ok, data: { audioBase64, mimeType } }` for the renderer.
-- `renderer.js` — User-visible labels and status use Kokoro (`kokoroReady`); `rmeVoiceAgentDashboardCard` IIFE unchanged.
-- `.env.example` — Dropped Piper vars; documented `RME_KOKORO_MODEL`, `RME_KOKORO_VOICES`, `RME_KOKORO_VOICE`.
-- `package.json` — Added `kokoro-js` dependency and electron-builder file globs for Kokoro runtime.
-- `scripts/patch-voice-env.ps1` — Patches Kokoro env paths; strips legacy `RME_PIPER_*` keys.
-- `scripts/setup-voice-stack.ps1` — Whisper/ffmpeg only; Kokoro via `npm install kokoro-js`.
-- `scripts/setup-piper-voice.ps1` — Removed (superseded by Kokoro npm package).
-- `lib/tts/normalize.js` — `normalizeForTts()` strips markdown/emoji, speaks numbers, currency, ISO dates, and acronyms.
-- `lib/tts/chunk.js` — `chunkForTts()` splits long replies at sentence/clause boundaries (max 120 words).
-- `lib/tts/kokoro.js` — Chunked synthesis with WAV merge; defaults `af_heart` / speed `0.93`; TTS error codes.
-- `.env.example` — `RME_KOKORO_VOICE=af_heart`, `RME_KOKORO_SPEED=0.93`.
-- `package.json` — Pinned `number-to-words@1.2.4`; packager includes new TTS lib files.
-- `lib/tts/kokoro.js` — `synthesizeStreaming()` + `warmTts()`; streams WAV chunks instead of blocking on full merge.
-- `lib/tts/chunk.js` — Default chunk size 200 words; `unitsForStreaming()` speaks the first sentence immediately.
-- `lib/voice-agent.js` — `speak(text, onChunk)` streams each synthesized chunk to the renderer.
-- `main.js` — `voice:tts-chunk` IPC events during `voice:speak`; `voice:warm-tts` preloads the model.
-- `preload.js` — `voiceApi.speak(text, onChunk)` + `warmTts()`; backward-compatible non-streaming fallback.
-- `renderer.js` — Plays TTS chunks as they arrive; warms Kokoro when the voice card loads.
-- `lib/log.js` — Main-process logger (`log.info` / `warn` / `error`) for Kokoro synth diagnostics.
-- `lib/tts/chunk.js` — Default `maxWords` 80; word-boundary split for oversize clauses (Kokoro ~510 token cap).
-- `lib/tts/kokoro.js` — `chunkForTts` loop, `patchWavHeader` on every chunk + merge, `kokoro.synth` log line.
-- `lib/voice-agent.js` — Stream path merges all chunk WAVs; returns merged `audioBase64` for playback.
-- `preload.js` — Forwards merged `audioBase64` on streamed `voice:speak` responses.
-- `renderer.js` — Plays one merged WAV after synthesis (progress via chunk callbacks); no per-chunk playback.
-- `package.json` — electron-builder includes `lib/log.js`.
-- `lib/tts/kokoro.js` — 5 ms PCM fade-in/out at chunk joins before merge; `kokoro.synth.merged` log; single Buffer return.
-- `lib/voice-agent.js` — `speak()` returns one merged base64 WAV only (no per-chunk IPC).
-- `main.js` — `voice:speak` returns one response; removed `voice:tts-chunk` events.
-- `preload.js` — `voiceApi.speak(text)` returns one `audioBase64` (no chunk listener).
-- `renderer.js` — One `Audio()` per speak via merged blob; no chunk chaining.
-- `lib/tts/kokoro.js` — `synthesize()` returns one merged WAV + stats; 5 ms PCM crossfade; `[kokoro]` terminal log.
-- `lib/voice-agent.js` — `speak` IPC `data` includes `audioBase64`, `chunks`, `bytes`, `durationMs` (single merged WAV).
-- `preload.js` — Forwards `chunks`, `bytes`, `durationMs` from `voice:speak` to the renderer.
-- `renderer.js` — One `Audio()` per reply; monospaced synth stats line under Hold-to-talk.
-- `lib/tts/kokoro.js` — `trimSilence()` before merge; 25 ms crossfade (600 samples); `trimmedMs` in synth log.
-- `lib/tts/chunk.js` — Default `maxWords` raised from 80 to 100.
-- `lib/voice-agent.js` — IPC `data.trimmedMs` for Voice card diagnostics.
-- `preload.js` — Forwards `trimmedMs` to renderer.
-- `renderer.js` — Status line shows `trimmed N ms` when multi-chunk and trim > 0.
-- `lib/tts/kokoro.js` — Removed silence trim; 75 ms overlap-crossfade merge (no speech loss).
-- `lib/voice-agent.js` — IPC `data.overlapMs` replaces `trimmedMs`.
-- `preload.js` — Forwards `overlapMs` to renderer.
-- `renderer.js` — Status line shows `75 ms overlap` for multi-chunk replies.
 
-- `lib/tts/chunk.js` — Default `maxWords` 50; `assertChunkCoverage()`; exports `splitByWordLimit`.
-- `lib/tts/chunk.test.js` — Vitest coverage for multi-chunk joins and dashboard 4-sentence reply.
-- `lib/tts/kokoro.js` — `expandChunksForSynth()` (40 words / ~420 tokens); boundary padding trim; overlap crossfade uses `i/overlap`; `trimmedMs` + `speechMs` stats.
-- `lib/voice-agent.js` — IPC `data.trimmedMs` and `data.speechMs` on `voice:speak`.
-- `preload.js` — Forwards `trimmedMs` and `speechMs` to renderer.
-- `renderer.js` — Voice card stats show trim ms and speech duration when present.
-- `lib/tts/kokoro.js` — Replaced 75 ms overlap mix with 15 ms cosine join fades + 30 ms silence-run trim (fixes chunk-boundary squeak/skip).
-- `renderer.js` — Stats label `join fade` instead of `overlap`.
-- `lib/tts/kokoro.js` — Speech-only extract + concat merge; 28 words / 200 chars per `generate()`; 8 ms join fade; always strip Kokoro padding.
-- `lib/tts/chunk.js` — Default `maxWords` 40.
-- `lib/tts/kokoro.js` — Trim Kokoro breath pauses at inter-chunk tails/heads (fixes pause-then-continue between parts).
-- `lib/tts/chunk.js` — `splitForSynth()` splits at sentences/clauses, not mid-phrase (fixes pause between "description" and "for").
-- `lib/tts/kokoro.js` — `expandChunksForSynth` uses `splitForSynth`; synth limits 42 words / 260 chars.
-- `lib/tts/kokoro.js` — Default Kokoro speed `1.08` (was `0.93`); `.env` `RME_KOKORO_SPEED=1.18` for slightly faster speech.
-- `lib/voice/sentence-buffer.js` — Pull complete sentences from Claude SSE for streaming TTS.
-- `lib/voice-agent.js` — `runAssistantTurn()` sentence-streaming Kokoro; Haiku routing; Anthropic prompt cache; `warmVoiceStack()`.
-- `main.js` — `voice:assistant-turn` IPC + `voice:tts-chunk` events; warm TTS speaks throwaway hello.
-- `preload.js` — `voiceApi.assistantTurn`, `onTtsChunk`.
-- `renderer.js` — Ordered sentence playback queue; first-audio latency in status.
-- `lib/voice-agent/whisper-server.js` — Persistent whisper-server on boot; HTTP `/inference`; CLI fallback.
-- `lib/voice-agent/warm.js` — Voice warm + `[voice] warmed — whisper=… kokoro=…` log.
-- `lib/voice/cuda-check.js` — CUDA 12 nvcc startup check.
-- `lib/voice/gpu-providers.js` — ONNX EP probe (cuda / dml / cpu).
-- `lib/tts/kokoro.js` — `executionProviders` via transformers env; GPU label + `firstSynthMs` log.
-- `lib/voice-agent.js` — Server-first transcribe; `getStatus().voiceGpuBadge`.
-- `main.js` — Boot `ensureWhisperServer`; `will-quit` stops server; CUDA warning.
-- `preload.js` — (unchanged IPC; status includes GPU badge fields).
-- `renderer.js` — Voice card shows `voiceGpuBadge` on startup.
-- `package.json` — `onnxruntime-node`; pack `lib/voice/**`, `lib/voice-agent/**`.
-- `.env.example` — Whisper server + `RME_KOKORO_DEVICE` + prompt cache vars.
-- `lib/voice-env-resolve.js` — Auto-resolve `whisper-server.exe`; `applyVoiceEnvPaths()` patches missing `.env` paths.
-- `lib/voice-agent/whisper-server.js` — Removed invalid `--gpu` flag (use `-ng` to disable); stderr parses `no GPU found`; resolved server bin.
-- `lib/voice-agent.js` — `getStatus()` uses server ready + `pickKokoroDevice()` before warm; transcribe uses resolved server bin.
-- `lib/voice-agent/warm.js` — Kokoro label after warm; whisper label from server stderr.
-- `main.js` — `applyVoiceEnvPaths` on boot and in `getVoiceAgent()`.
-- `renderer.js` — `await warmTts()` before `getStatus()` so GPU badge is accurate.
-- `package.json` — Pin `onnxruntime-node@1.21.0` (matches transformers; fixes ORT API mismatch).
-- `scripts/patch-voice-env.ps1` — Bundled `whisper-server.exe` path instead of `C:\tools\whisper-cuda\`.
-- `lib/voice-agent.js` — Voice uses `RME_VOICE_ANTHROPIC_MODEL` (Haiku default); `firstTokenMs` log; 512 token cap; early TTS clauses.
-- `lib/voice/sentence-buffer.js` — `pullSpeakableUnits()` for comma/word early speak chunks.
-- `renderer.js` — "Replying…" on first Claude token; done status shows Claude vs speech latency.
-- `renderer.js` — Voice card removed; fixed center mic orb (click toggle green/red); pipeline runs in background with console logs.
-- `index.html` — Voice workspace pane empty (orb is global, fixed center).
-- `lib/tts/kokoro.js` — `synthesizeUtterance()` fast path for voice sentences (no multi-chunk merge).
-- `lib/voice-agent.js` — Serial TTS queue; return before all synth finishes; pipeline timing logs; shorter voice prompt (220 tokens).
-- `renderer.js` — Orb idle when Claude+first TTS ready; playback async (no await full 35s speech); IPC audio Buffer not base64.
-- `main.js` — TTS chunks send raw Buffer over IPC.
-- `lib/voice-agent.js` — Voice ultra-fast mode: one short answer, 48-token cap, cached "Okay." acknowledgement, boot-warmed Kokoro utterance.
-- `lib/tts/kokoro.js` — Cache `synthesizeUtterance()` results so the acknowledgement is effectively instant after warm.
-- `main.js` — Start voice warm-up in the background during app boot, before the first click-to-talk turn.
-- `scripts/patch-voice-env.ps1` / `.env.example` — Set `RME_KOKORO_SPEED=1.65`, `RME_VOICE_MAX_TOKENS=48`, and acknowledgement env vars.
-- `.env.example` — `RME_VOICE_ANTHROPIC_MODEL`, `RME_VOICE_MAX_TOKENS`, `RME_VOICE_USE_MAIN_MODEL`.
-- `.env` / `scripts/patch-voice-env.ps1` / `.env.example` — Set voice and short-turn brain model defaults to `claude-opus-4-7`.
-- `lib/voice-agent.js` / `.env` / `scripts/patch-voice-env.ps1` / `.env.example` — Voice prompt restored to detailed spoken answers; `RME_VOICE_MAX_TOKENS=700`.
-- `lib/voice-agent.js` — Replaced voice system prompt with RME sidekick identity, company canon, guardrails, examples, and latency acknowledgement rule.
-- `lib/tts/normalize.js` / `lib/tts/normalize.test.js` — Strip `[slow]`, `[fast]`, `[emph]`, and `[pause=...]` prosody tags before Kokoro speaks.
-- `lib/voice-agent.js` — Removed filler/acknowledgement instructions from RME voice prompt; first clause is now direct answer only.
-- `lib/voice/sentence-buffer.js` / `renderer.js` — Smaller repeated streaming chunks plus TTS done signal so the renderer keeps receiving audio until synthesis completes.
-- `.env` — Restored `RME_KOKORO_SPEED=1.75` for faster playback.
+## Active voice stack — Chatterbox migration
+- `lib/tts/chatterbox.js` — Node-side Chatterbox client. Talks to the Python sidecar over local HTTP. Exposes `synthesize(text, opts)`, `synthesizeUtterance()` (fast path for short voice replies), `warmTts()`, and synth stats (`chunks`, `bytes`, `durationMs`, `firstSynthMs`, `trimmedMs`, `speechMs`). Streams long replies as multi-chunk WAV merges with short cosine join fades.
+- `lib/voice-agent/chatterbox-server.js` — Spawns and supervises the Chatterbox Python sidecar (venv + `chatterbox-tts`). Binds `127.0.0.1` only. Restart-on-crash with backoff. Stops cleanly on `will-quit`.
+- `lib/tts/chunk.js` — Sentence/clause splitter for streaming TTS. Default `maxWords` tuned for Chatterbox; exports `splitForSynth()` and `assertChunkCoverage()`.
+- `lib/tts/normalize.js` — Strips markdown, emoji, prosody tags (`[slow]`, `[fast]`, `[emph]`, `[pause=…]`); speaks numbers, currency, ISO dates, and acronyms cleanly.
+- `lib/voice/sentence-buffer.js` — Pulls complete sentences and early speakable clauses from the Claude SSE stream so first audio plays as soon as possible.
+- `lib/voice-agent.js` — Serial TTS queue; sentence-streaming Chatterbox; voice routing; `getStatus()` exposes `chatterboxReady`, `chatterboxVoice`, `chatterboxDevice`, `voiceGpuBadge`.
+- `main.js` — Boots `ensureChatterboxServer()` + `ensureWhisperServer()` on app start; `voice:warm-tts`, `voice:speak`, `voice:assistant-turn` IPC; sends TTS audio to the renderer as raw `Buffer` (not base64); CUDA startup check; stops both sidecars on `will-quit`.
+- `preload.js` — `window.voiceApi`: `speak(text)`, `assistantTurn(turn)`, `warmTts()`, `getStatus()`, `onTtsChunk(cb)`. Forwards `audioBase64`, `chunks`, `bytes`, `durationMs`, and the GPU badge.
+- `renderer.js` — Fixed center voice orb (no card). Click-toggle green/red. Ordered sentence playback queue. First-token + first-audio latency in status. Status shows Chatterbox readiness + GPU badge.
+- `.env.example` — Chatterbox env vars: `RME_CHATTERBOX_PORT`, `RME_CHATTERBOX_MODEL`, `RME_CHATTERBOX_VOICE` (or reference audio path), `RME_CHATTERBOX_DEVICE=auto`, `RME_CHATTERBOX_SPEED`, `RME_CHATTERBOX_EXAGGERATION`, `RME_CHATTERBOX_CFG_WEIGHT`. Whisper vars unchanged. Voice routing: `RME_VOICE_ANTHROPIC_MODEL`, `RME_VOICE_MAX_TOKENS`.
+- `package.json` — Removed `kokoro-js`. Added `electron-builder` file globs for `lib/tts/**`, `lib/voice/**`, `lib/voice-agent/**`. `onnxruntime-node` retained for Whisper.
+- `scripts/setup-chatterbox.ps1` — Creates Python venv, installs `chatterbox-tts` and dependencies, downloads model weights to a deterministic path under `userData/`.
+- `scripts/setup-voice-stack.ps1` — Now orchestrates Whisper + Chatterbox setup (delegates to `setup-chatterbox.ps1`). Piper / Kokoro paths removed.
+- `scripts/patch-voice-env.ps1` — Patches `RME_CHATTERBOX_*` paths into `.env`; strips legacy `RME_KOKORO_*` and `RME_PIPER_*` keys.
+- `lib/voice-env-resolve.js` — Resolves `whisper-server.exe` and `chatterbox-server` Python entry; `applyVoiceEnvPaths()` patches missing `.env` paths on boot and in `getVoiceAgent()`.
+- `lib/log.js` — Main-process logger for sidecar diagnostics (`chatterbox.spawn`, `chatterbox.synth`, `chatterbox.crash`, `whisper.spawn`).
+- `lib/voice-agent/warm.js` — Warm log line `[voice] warmed — whisper=… chatterbox=…`.
+- `lib/voice/cuda-check.js` — CUDA 12 nvcc startup check (shared by Whisper + Chatterbox).
+- `lib/voice/gpu-providers.js` — ONNX EP probe for Whisper (cuda / dml / cpu). Chatterbox device resolved via the Python sidecar.
+
+## Historical — Kokoro era (superseded by Chatterbox migration)
+- All `lib/tts/kokoro.js`, `RME_KOKORO_*`, `kokoro-js`, and Kokoro-specific renderer status fields were removed in the Chatterbox migration. Files deleted: `lib/tts/kokoro.js`, `scripts/setup-piper-voice.ps1`. Env vars removed: `RME_KOKORO_MODEL`, `RME_KOKORO_VOICES`, `RME_KOKORO_VOICE`, `RME_KOKORO_SPEED`, `RME_KOKORO_DEVICE`. Engineering lessons from that era (sentence-streaming, chunk crossfade, warm-on-boot, serial TTS queue, raw-Buffer IPC, fixed center orb) carried over to Chatterbox unchanged.
+
+## Other active threads
+- `renderer.js` — `rmeAdminFileBackedAutoSignIn` IIFE remains the canonical admin auto-sign-in. `rmeForceBottomDashboardCardsFromVaultTeacherSource` remains the canonical dashboard analytics source.
+- `main.js` — `admin-creds:save / :load / :clear` IPC handlers gated by `ALLOWED_ADMIN_EMAIL`.
+- `preload.js` — `window.adminCredsApi` bridge surface unchanged.

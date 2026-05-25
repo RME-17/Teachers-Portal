@@ -1,0 +1,25 @@
+# Cut indexing noise — see NAVIGATION.md / .cursor/rules/codebase-map.md
+node_modules/
+dist/
+tools/voice/
+
+# Python / tooling artifacts
+tools/tts/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Secrets and local env (also in .gitignore)
+.env
+supabase.public.env
+
+# Aider / local editor churn
+.aider*
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4
+
+# Large static assets (wallpapers not needed for code search)
+assets/app-backgrounds/
+
+# Packaged / vendor noise at repo root
+NVIDIA Corporation/

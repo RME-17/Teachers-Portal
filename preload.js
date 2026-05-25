@@ -206,20 +206,9 @@ contextBridge.exposeInMainWorld("voiceApi", {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  setVoice: (name) => ipcRenderer.invoke("voice:set-voice", { name }),
+  getVoice: () => ipcRenderer.invoke("voice:get-voice"),
 });
-
-contextBridge.exposeInMainWorld("mcpApi", {
-  status: () => ipcRenderer.invoke("mcp:status"),
-  callTool: (name, args) => ipcRenderer.invoke("mcp:call-tool", { name, args }),
-  onStatusChange: (handler) => {
-    if (typeof handler !== "function") return () => {};
-    const channel = "mcp:status-change";
-    const listener = (_evt, detail) => { try { handler(detail); } catch { } };
-    ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
-  },
-});
-
 
 contextBridge.exposeInMainWorld("memoryApi", {
   recall: (queryText, k) => ipcRenderer.invoke("memory:recall", { queryText, k }),

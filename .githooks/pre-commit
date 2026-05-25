@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-commit hook to run gitleaks
+exec 1>&2
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks detect --staged
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "gitleaks found potential secrets. Commit aborted. Run 'gitleaks detect --staged' locally to inspect." >&2
+    exit $rc
+  fi
+else
+  echo "gitleaks not installed; skipping secret scan. To enforce, install gitleaks: https://github.com/zricethezav/gitleaks" >&2
+fi
+exit 0
