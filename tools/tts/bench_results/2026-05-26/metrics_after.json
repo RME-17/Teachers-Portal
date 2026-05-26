@@ -1,0 +1,9 @@
+{
+  "gpuUtil": 2,
+  "vramUsedMb": 2980.7265625,
+  "cpuUtil": 5.5,
+  "rssMb": 1755.109375,
+  "warnings": [
+    "High GPU util: 100%"
+  ]
+}

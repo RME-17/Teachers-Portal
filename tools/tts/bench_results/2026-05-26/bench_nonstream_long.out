@@ -1,0 +1,15 @@
+status 200
+elapsed 23.131394147872925
+len_bytes 1927724
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<frozen runpy>", line 291, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "bench_nonstream_long.py", line 14, in <module>
+    print('text_or_json:', r.text[:200])
+  File "C:\Users\infor\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 24: character maps to <undefined>
+text_or_json: 
