@@ -17,12 +17,15 @@ import time
 logging.basicConfig(level=logging.INFO, format="[chatterbox] %(message)s")
 log = logging.getLogger(__name__)
 
+# Cache for voice conditionals so we don't re-extract on every request
+_COND_CACHE = {}
+
 parser = argparse.ArgumentParser(description="Chatterbox TTS server")
 parser.add_argument("--port", type=int, default=8123, help="Port to listen on")
 parser.add_argument("--device", default="auto", help="Device: cuda, cpu, auto")
 parser.add_argument("--model", default=os.environ.get("RME_CHATTERBOX_MODEL", "original"), choices=["turbo", "original", "multilingual"])
 parser.add_argument("--voice-ref", default=None, help="Path to voice reference WAV (default: tools/tts/voices/aaron.wav)")
-parser.add_argument("--default-exaggeration", type=float, default=float(os.environ.get("CHATTERBOX_EXAGGERATION", "0.5")), help="Default exaggeration for cached conditionals")
+parser.add_argument("--default-exaggeration", type=float, default=float(os.environ.get("RME_CHATTERBOX_EXAGGERATION", os.environ.get("CHATTERBOX_EXAGGERATION", "0.7"))), help="Default exaggeration for cached conditionals")
 args = parser.parse_args()
 
 # Resolve device
@@ -102,9 +105,6 @@ VOICE_MAP = {
     "lucy": os.path.join(VOICE_DIR, "lucy.wav"),
 }
 
-# Cache for voice conditionals so we don't re-extract on every request
-_COND_CACHE = {}
-
 
 class TTSRequest(BaseModel):
     input: str
@@ -121,7 +121,7 @@ async def speech(req: TTSRequest):
         exaggeration=req.exaggeration,
         cfg_weight=req.cfg_weight,
     )
-    ref_path = VOICE_MAP.get(req.voice)
+    ref_path = VOICE_MAP.get(req.voice) or DEFAULT_VOICE_REF
     log.info("synth start chars=%d used_cached_conds=%s", len(req.input), ref_path in _COND_CACHE)
     if not (ref_path and os.path.isfile(ref_path)):
         if req.voice and os.path.isfile(req.voice):
