@@ -1,0 +1,17 @@
+Done 1 chars 6 status 200 size 40364 duration 0.84 synth 1.075
+Done 2 chars 38 status 200 size 134444 duration 2.8 synth 1.994
+Done 3 chars 198 status 200 size 587564 duration 12.24 synth 7.6
+Done 4 chars 188 status 200 size 620204 duration 12.92 synth 7.332
+Done 5 chars 440 status 200 size 1321004 duration 27.52 synth 16.323
+
+Results:
+|#|chars|duration_s|synth_s|RTF|size_bytes|
+|1|6|0.84|1.075|1.28|40364|
+|2|38|2.8|1.994|0.712|134444|
+|3|198|12.24|7.6|0.621|587564|
+|4|188|12.92|7.332|0.567|620204|
+|5|440|27.52|16.323|0.593|1321004|
+
+Output folder: tools/tts/test_outputs
+nvidia snapshot: 3033, 100
+health {'status': 'ok', 'model': 'chatterbox-streaming', 'device': 'cuda'}

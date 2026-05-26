@@ -1,0 +1,16 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^C:/Users/infor/AppData/Local/Python/pythoncore-3\\.14-64/python\\.exe tools/tts/chatterbox-server\\.py --port 8123 --device auto$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^C:/Users/infor/AppData/Local/Python/pythoncore-3\\.14-64/python\\.exe tools/tts/run_nonstream_debug\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^C:/Users/infor/AppData/Local/Python/pythoncore-3\\.14-64/python\\.exe tools/tts/bench_stream\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

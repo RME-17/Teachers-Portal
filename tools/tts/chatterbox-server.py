@@ -99,7 +99,7 @@ if target_device == "cuda" and torch.cuda.is_available():
     try:
         # Move the autoregressive T3 to GPU in fp16 and keep the vocoder on CPU
         # Put T3 on CUDA fp16 and S3Gen on CUDA float32 (keep both on GPU)
-        model.t3 = model.t3.to("cuda").half()
+        model.t3 = model.t3.to("cuda").float()
         # S3Gen uses ops that do not support fp16 (e.g. reflection_pad1d),
         # so keep S3Gen weights in float32 on CUDA and ensure its internal
         # dtype flag is float32.
@@ -207,21 +207,22 @@ else:
 # Hybrid Device Map & Optimizations
 if device == "cuda":
     try:
-        # Ensure T3 is fp16 on GPU and S3Gen stays float32 on GPU
-        model.t3 = model.t3.to("cuda").half()
+        # Use fp32 for T3 on GPU (disable fp16) and keep S3Gen float32 on GPU
+        model.t3 = model.t3.to("cuda").float()
         model.s3gen = model.s3gen.to("cuda").float()
         try:
             setattr(model.s3gen, 'dtype', torch.float32)
         except Exception:
             pass
-        
+
         # Limit KV-cache for VRAM efficiency (Approximate by modifying config if possible)
         if hasattr(model.t3, "hp"):
             # Note: Actual KV-cache limit depends on the implementation of T3.inference_turbo
             # We will set max_new_tokens to cap the total sequence length
             pass
 
-        log.info("Device map applied: T3 -> CUDA (fp16), S3Gen -> CUDA (float32)")
+        log.info("Device map applied: T3 -> CUDA (fp32), S3Gen -> CUDA (float32)")
+
         # Ensure embed_ref wrapper exists here as well
         try:
             if hasattr(model.s3gen, 'embed_ref') and not hasattr(model.s3gen, '_embed_ref_safe_wrapped'):
@@ -265,8 +266,6 @@ if device == "cuda":
                 model.s3gen.speaker_encoder.inference = _se_inference_safe
         except Exception:
             log.exception("Failed to wrap speaker_encoder.inference")
-        except Exception:
-            log.exception("Failed to ensure s3gen.embed_ref wrapper in second block")
     except Exception as e:
         log.warning("Hybrid device map failed: %s. Using single device.", e)
 
