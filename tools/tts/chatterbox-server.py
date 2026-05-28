@@ -98,8 +98,8 @@ except Exception as e:
 if target_device == "cuda" and torch.cuda.is_available():
     try:
         # Move the autoregressive T3 to GPU in fp32 and keep the vocoder on CPU
-        # Put T3 on CUDA (fp32) and S3Gen on CUDA float32 (keep both on GPU)
-        model.t3 = model.t3.to("cuda").float()
+        # Put T3 on CUDA (fp16) and S3Gen on CUDA float32 (fp16 T3 doubles throughput)
+        model.t3 = model.t3.to("cuda").half()
         # S3Gen uses ops that do not support fp16 (e.g. reflection_pad1d),
         # so keep S3Gen weights in float32 on CUDA and ensure its internal
         # dtype flag is float32.
@@ -137,7 +137,7 @@ if target_device == "cuda" and torch.cuda.is_available():
 
         model.device = "cuda"
         device = "cuda"
-        log.info("Device map applied: T3 -> CUDA (fp32), S3Gen -> CUDA (float32)")
+        log.info("Device map applied (block 1): T3 -> CUDA (fp16), S3Gen -> CUDA (float32)")
         # Add a debug wrapper to cond_enc.forward to inspect cond object at call-time
         try:
             import types
@@ -207,8 +207,8 @@ else:
 # Hybrid Device Map & Optimizations
 if device == "cuda":
     try:
-        # Use fp32 for T3 on GPU (disable fp16) and keep S3Gen float32 on GPU
-        model.t3 = model.t3.to("cuda").float()
+        # Use fp16 for T3 on GPU (double throughput) and keep S3Gen float32 on GPU
+        model.t3 = model.t3.to("cuda").half()
         model.s3gen = model.s3gen.to("cuda").float()
         try:
             setattr(model.s3gen, 'dtype', torch.float32)
@@ -221,7 +221,7 @@ if device == "cuda":
             # We will set max_new_tokens to cap the total sequence length
             pass
 
-        log.info("Device map applied: T3 -> CUDA (fp32), S3Gen -> CUDA (float32)")
+        log.info("Device map applied (block 2): T3 -> CUDA (fp16), S3Gen -> CUDA (float32)")
 
         # Ensure embed_ref wrapper exists here as well
         try:
