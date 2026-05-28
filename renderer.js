@@ -17983,7 +17983,11 @@ function setAssistantBubbleText(bubble, text) {
           system: undefined,
         });
         await voiceScheduleChain.catch(() => {});
-        await voiceQueueDone;
+        voiceAllChunksQueued = true;
+        if (voiceChunksPending > 0) {
+          voicePlaybackDone = new Promise(r => { voicePlaybackDoneResolve = r; });
+          await voicePlaybackDone;
+        }
         await new Promise(r => setTimeout(r, 0));
         unsubTts();
         unsubDelta();
@@ -18102,8 +18106,10 @@ function setAssistantBubbleText(bubble, text) {
     /** @type {Array<{source: AudioBufferSourceNode, ctx: AudioContext}>} */
     const voicePlayQueue = [];
     let voicePlaying = false;
-    let voiceQueueDoneResolve = null;
-    let voiceQueueDone = Promise.resolve();
+    let voiceChunksPending = 0;
+    let voiceAllChunksQueued = false;
+    let voicePlaybackDoneResolve = null;
+    let voicePlaybackDone = Promise.resolve();
     /** @type {Set<AudioBufferSourceNode>} */
     const activeVoiceSources = new Set();
     /** @type {AnalyserNode | null} */
@@ -18126,12 +18132,19 @@ function setAssistantBubbleText(bubble, text) {
       return voiceAudioCtx;
     }
 
+    function resolveVoicePlaybackDone() {
+      if (voicePlaybackDoneResolve) {
+        voicePlaybackDoneResolve();
+        voicePlaybackDoneResolve = null;
+      }
+      voicePlaybackDone = Promise.resolve();
+    }
+
     function processVoicePlayQueue() {
       if (voicePlaying) return;
       if (voicePlayQueue.length === 0) {
-        if (voiceQueueDoneResolve) {
-          voiceQueueDoneResolve();
-          voiceQueueDoneResolve = null;
+        if (voiceChunksPending <= 0 && voiceAllChunksQueued) {
+          resolveVoicePlaybackDone();
         }
         return;
       }
@@ -18143,12 +18156,16 @@ function setAssistantBubbleText(bubble, text) {
       source.onended = () => {
         activeVoiceSources.delete(source);
         voicePlaying = false;
+        voiceChunksPending--;
         processVoicePlayQueue();
       };
     }
 
     function resetVoicePlaybackSchedule() {
       voiceScheduleChain = Promise.resolve();
+      voiceChunksPending = 0;
+      voiceAllChunksQueued = false;
+      resolveVoicePlaybackDone();
     }
 
     function startVoiceGlow() {
@@ -18213,11 +18230,8 @@ function setAssistantBubbleText(bubble, text) {
       activeVoiceSources.clear();
       voicePlayQueue.length = 0;
       voicePlaying = false;
-      if (voiceQueueDoneResolve) {
-        voiceQueueDoneResolve();
-        voiceQueueDoneResolve = null;
-      }
-      voiceQueueDone = Promise.resolve();
+      voiceChunksPending = 0;
+      resolveVoicePlaybackDone();
     }
 
     window.__rmeVoiceStopPlayback = stopVoicePlayback;
@@ -18266,10 +18280,8 @@ function setAssistantBubbleText(bubble, text) {
           voiceGain.gain.value = 1.0;
           source.connect(voiceGain);
           voiceGain.connect(ctx.destination);
+          voiceChunksPending++;
           voicePlayQueue.push({ source, ctx });
-          if (!voiceQueueDoneResolve) {
-            voiceQueueDone = new Promise(r => { voiceQueueDoneResolve = r; });
-          }
           processVoicePlayQueue();
         });
       return voiceScheduleChain;
