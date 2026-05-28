@@ -18237,7 +18237,7 @@ function setAssistantBubbleText(bubble, text) {
           const now = ctx.currentTime;
           const startAt = Math.max(now + 0.005, voiceNextStartTime);
           source.start(startAt);
-          voiceNextStartTime = startAt + buffer.duration + 0.3;
+          voiceNextStartTime = startAt + buffer.duration + 0.2;
           activeVoiceSources.add(source);
           source.onended = () => {
             activeVoiceSources.delete(source);
