@@ -51,25 +51,31 @@ if not HAS_PSUTIL:
 
 log = logging.getLogger(__name__)
 
-
-# Import ChatterboxTTS (which now includes generate_stream from the streaming fork)
-try:
-    from chatterbox.tts_turbo import ChatterboxTurboTTS as ChatterboxTTS
-except ImportError as e:
-    logging.error("Could not import ChatterboxTurboTTS: %s", e)
-    # Fail loudly so missing/incorrect Python environments don't hide real errors.
-    sys.exit(1)
-
 logging.basicConfig(level=logging.INFO, format="[chatterbox] %(message)s")
 log = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(description="Chatterbox TTS Streaming Server")
 parser.add_argument("--port", type=int, default=8123, help="Port to listen on")
 parser.add_argument("--device", default="auto", help="Device: cuda, cpu, auto")
-parser.add_argument("--model", default="original", help="Model: original")
+parser.add_argument("--model", default="turbo", help="Model: turbo (fast), original (full quality, better prosody)")
 parser.add_argument("--voice-ref", default=None, help="Path to voice reference WAV")
 parser.add_argument("--default-exaggeration", type=float, default=0.5, help="Default exaggeration")
 args = parser.parse_args()
+
+# Import ChatterboxTTS based on model selection
+model_name = args.model.lower()
+if model_name == "original":
+    try:
+        from chatterbox.tts import ChatterboxTTS as ChatterboxTTS
+    except ImportError as e:
+        logging.error("Could not import ChatterboxTTS (base model): %s", e)
+        sys.exit(1)
+else:
+    try:
+        from chatterbox.tts_turbo import ChatterboxTurboTTS as ChatterboxTTS
+    except ImportError as e:
+        logging.error("Could not import ChatterboxTurboTTS: %s", e)
+        sys.exit(1)
 
 # Resolve device preference (target) but always load weights to CPU first to avoid
 # OOMs when loading large models. We'll then move the T3 component to GPU if
