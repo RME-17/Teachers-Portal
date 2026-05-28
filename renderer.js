@@ -18236,6 +18236,9 @@ function setAssistantBubbleText(bubble, text) {
           voiceGain.connect(ctx.destination);
           const now = ctx.currentTime;
           const startAt = Math.max(now + 0.005, voiceNextStartTime);
+          if (startAt > now + 0.1) {
+            console.log('[voice] schedule gap', (startAt - now).toFixed(2), 's');
+          }
           source.start(startAt);
           voiceNextStartTime = startAt + buffer.duration;
           activeVoiceSources.add(source);
