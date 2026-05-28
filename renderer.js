@@ -18101,6 +18101,30 @@ function setAssistantBubbleText(bubble, text) {
       return null;
     }
 
+    function logWavIntegrity(bytes, seq) {
+      try {
+        if (bytes.length < 44) return;
+        const readU32 = (off) => (bytes[off] | bytes[off+1]<<8 | bytes[off+2]<<16 | bytes[off+3]<<24) >>> 0;
+        const riffSize = readU32(4) + 8;
+        const dataSize = readU32(bytes.length - 4);
+        const dataOffset = (() => {
+          let off = 12;
+          while (off + 8 <= bytes.length) {
+            const id = String.fromCharCode(bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]);
+            const sz = readU32(off + 4);
+            if (id === "data") return off + 8;
+            off += 8 + sz + (sz % 2);
+          }
+          return 44;
+        })();
+        const actualData = bytes.length - dataOffset;
+        const expectedData = readU32(40);
+        if (actualData !== expectedData || riffSize !== bytes.length) {
+          console.warn(`[voice] WAV mismatch chunk=${seq} riffSize=${riffSize} vs actual=${bytes.length} declData=${expectedData} vs actualData=${actualData}`);
+        }
+      } catch {}
+    }
+
     /**
      * Shared Web Audio context + queue used for gapless back-to-back streaming TTS chunks.
      * Each WAV chunk is decoded and pushed to `voicePlayQueue`; playback is event-driven
@@ -18242,6 +18266,7 @@ function setAssistantBubbleText(bubble, text) {
           if (!bytes || bytes.length <= 44) {
             throw new Error("No playable audio from TTS.");
           }
+          logWavIntegrity(bytes, tts.index);
           const ctx = getVoiceAudioContext();
           if (!ctx) {
             await playVoiceTtsAudio(tts);
