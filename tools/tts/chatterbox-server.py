@@ -11,6 +11,25 @@ import time
 import asyncio
 from typing import Generator
 
+# --- Optional dependency shim ---
+# chatterbox's base model imports a top-level `perth` module for watermarking.
+# In some environments this resolves but exposes `PerthImplicitWatermarker=None`,
+# which crashes model init. We provide a no-op fallback so synthesis can proceed.
+try:
+	import perth as _perth  # type: ignore
+except Exception:
+	_perth = None
+if _perth is None or getattr(_perth, "PerthImplicitWatermarker", None) is None or not callable(getattr(_perth, "PerthImplicitWatermarker", None)):
+	import types as _types
+	_perth_mod = _types.ModuleType("perth")
+	class PerthImplicitWatermarker:  # noqa: N801
+		def __init__(self, *args, **kwargs):
+			pass
+		def apply_watermark(self, wav, sample_rate=None, **kwargs):
+			return wav
+	_perth_mod.PerthImplicitWatermarker = PerthImplicitWatermarker
+	sys.modules["perth"] = _perth_mod
+
 # --- Tuning and Optimizations ---
 # Set thread counts to physical core count - 1 to avoid CPU saturation
 import multiprocessing
@@ -135,7 +154,9 @@ if target_device == "cuda" and torch.cuda.is_available():
                                 kwargs[k] = v.to('cuda', dtype=torch.float32)
                         except Exception:
                             pass
-                    return _orig_embed_ref(*new_args, **kwargs)
+                    if callable(_orig_embed_ref):
+                        return _orig_embed_ref(*new_args, **kwargs)
+                    return None
 
                 model.s3gen.embed_ref = _embed_ref_safe
         except Exception:
@@ -147,7 +168,7 @@ if target_device == "cuda" and torch.cuda.is_available():
         # Add a debug wrapper to cond_enc.forward to inspect cond object at call-time
         try:
             import types
-            if hasattr(model.t3, 'cond_enc') and hasattr(model.t3.cond_enc, 'forward'):
+            if hasattr(model.t3, 'cond_enc') and hasattr(model.t3.cond_enc, 'forward') and callable(model.t3.cond_enc.forward):
                 _orig_cond_enc_forward = model.t3.cond_enc.forward
 
                 def _cond_enc_forward_debug(self, cond):
@@ -199,7 +220,9 @@ if target_device == "cuda" and torch.cuda.is_available():
                                 pass
                     except Exception:
                         pass
-                    return _orig_cond_enc_forward(cond)
+                    if callable(_orig_cond_enc_forward):
+                        return _orig_cond_enc_forward(cond)
+                    return cond
 
                 model.t3.cond_enc.forward = types.MethodType(_cond_enc_forward_debug, model.t3.cond_enc)
         except Exception:
@@ -249,7 +272,9 @@ if device == "cuda":
                                 kwargs[k] = v.to('cuda', dtype=torch.float32)
                         except Exception:
                             pass
-                    return _orig_embed_ref2(*new_args, **kwargs)
+                    if callable(_orig_embed_ref2):
+                        return _orig_embed_ref2(*new_args, **kwargs)
+                    return None
 
                 model.s3gen.embed_ref = _embed_ref_safe2
                 setattr(model.s3gen, '_embed_ref_safe_wrapped', True)
@@ -267,7 +292,9 @@ if device == "cuda":
                             speech = speech.to('cuda', dtype=torch.float32)
                     except Exception:
                         pass
-                    return _orig_se_inference(speech, *a, **kw)
+                    if callable(_orig_se_inference):
+                        return _orig_se_inference(speech, *a, **kw)
+                    return speech
 
                 model.s3gen.speaker_encoder.inference = _se_inference_safe
         except Exception:
@@ -325,7 +352,14 @@ def get_conditionals(ref_path: str, exaggeration: float):
         prev_model_device = getattr(model, "device", None)
         try:
             model.device = "cpu"
-            model.prepare_conditionals(ref_path, exaggeration=exaggeration)
+            prep = getattr(model, "prepare_conditionals", None)
+            if callable(prep):
+                prep(ref_path, exaggeration=exaggeration)
+            else:
+                log.warning("prepare_conditionals is not callable; using existing conditionals if available")
+                existing = getattr(model, "conds", None)
+                if existing is None:
+                    return None
         finally:
             # restore previous device flag so generation still knows target device
             if prev_model_device is not None:
@@ -576,8 +610,12 @@ async def resource_monitor():
     while True:
         try:
             # CPU and Memory
-            cpu_util = psutil.cpu_percent()
-            rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+            if HAS_PSUTIL and psutil is not None:
+                cpu_util = psutil.cpu_percent()
+                rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+            else:
+                cpu_util = 0
+                rss_mb = 0
             
             gpu_util = 0
             vram_used = 0

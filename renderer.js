@@ -17959,7 +17959,10 @@ function setAssistantBubbleText(bubble, text) {
         const unsubTts =
           playTts && typeof api.onTtsChunk === "function"
             ? api.onTtsChunk((detail) => {
-                if (detail.done) return;
+							if (detail.done) {
+								voiceAllChunksQueued = true;
+								return;
+							}
                 if (detail.audio) scheduleVoiceTtsAudio(detail);
               })
             : () => {};
@@ -17984,14 +17987,9 @@ function setAssistantBubbleText(bubble, text) {
         });
         await voiceScheduleChain.catch(() => {});
         voiceAllChunksQueued = true;
-        /* Poll for actual playback completion — handles any IPC/timing edge cases */
+			/* Wait for all emitted chunks to arrive, queue, and finish playback */
         for (;;) {
-          if (!(voiceChunksPending > 0 || voicePlaying || voicePlayQueue.length > 0)) break;
-          await new Promise(r => setTimeout(r, 100));
-        }
-        /* Grace period + re-check for late-arriving IPC chunk */
-        await new Promise(r => setTimeout(r, 300));
-        while (voiceChunksPending > 0 || voicePlaying || voicePlayQueue.length > 0) {
+				if (voiceAllChunksQueued && !(voiceChunksPending > 0 || voicePlaying || voicePlayQueue.length > 0)) break;
           await new Promise(r => setTimeout(r, 100));
         }
         unsubTts();
