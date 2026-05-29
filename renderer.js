@@ -17628,13 +17628,14 @@ setupAccountSecurityPanels();
   const WAKE_MIN_BYTES = 14000;
   const WAKE_CHECK_DEBOUNCE_MS = 3000;
   const VAD_SPEECH_THRESHOLD = 0.5;
-  const VAD_MIN_SPEECH_MS = Number(process.env.VAD_MIN_SPEECH_MS) || 250;
-  const VAD_MIN_SILENCE_MS = Number(process.env.VAD_MIN_SILENCE_MS) || 700;
-  const VAD_SPEECH_PAD_MS = Number(process.env.VAD_SPEECH_PAD_MS) || 300;
+  const VAD_MIN_SPEECH_MS = 250;
+  const VAD_MIN_SILENCE_MS = 700;
+  const VAD_SPEECH_PAD_MS = 300;
   const VAD_MAX_UTTERANCE_MS = 45000;
   const VAD_SAMPLE_RATE = 16000;
   const VAD_BUFFER_SIZE = 512;
   const VAD_SPEECH_PAD_SAMPLES = Math.round(VAD_SPEECH_PAD_MS / 1000 * VAD_SAMPLE_RATE);
+  let _vadCfgPrinted = false;
 
   /** @type {((userText: string, opts?: { playTts?: boolean; streamToChat?: boolean }) => Promise<void>) | null} */
   let runAssistantUserTurnRef = null;
@@ -18139,9 +18140,22 @@ function setAssistantBubbleText(bubble, text) {
        }
      }
 
-      async function ensureVadNodeRunning() {
-        if (!st.stream) return;
-        if (!st.vadAudioCtx || st.vadAudioCtx.state === "closed") {
+       async function ensureVadNodeRunning() {
+         if (!st.stream) return;
+         if (!_vadCfgPrinted) {
+           _vadCfgPrinted = true;
+           console.log(
+             "[voice] VAD endpointing config:",
+             `speechThreshold=${VAD_SPEECH_THRESHOLD}`,
+             `minSpeechMs=${VAD_MIN_SPEECH_MS}`,
+             `minSilenceMs=${VAD_MIN_SILENCE_MS}`,
+             `speechPadMs=${VAD_SPEECH_PAD_MS}`,
+             `maxUtteranceMs=${VAD_MAX_UTTERANCE_MS}`,
+             `sampleRate=${VAD_SAMPLE_RATE}`,
+             `bufferSize=${VAD_BUFFER_SIZE}`,
+           );
+         }
+         if (!st.vadAudioCtx || st.vadAudioCtx.state === "closed") {
           const Ctor = window.AudioContext || window.webkitAudioContext;
           if (!Ctor) return;
           st.vadAudioCtx = new Ctor({ sampleRate: VAD_SAMPLE_RATE });

@@ -5,15 +5,15 @@ alwaysApply: true
 
 This is the authoritative map. Do NOT re-explore the codebase. Use this to jump straight to the right file, then read only that file.
 
-Full detail + audit backlog: NAVIGATION.md · Agent rules: AGENTS.md · Portals: .cursor/skills/rme-two-portals/SKILL.md
+Full rules: AGENTS.md · Portals: .cursor/skills/rme-two-portals/SKILL.md
 
-**Last verified:** 2026-05-24 (`wc -l` Git Bash). Refresh when adding a new sidecar or major IPC (~2 weeks). Sync NAVIGATION.md + this file.
+**Last verified:** 2026-05-29. Refresh when adding a new sidecar or major IPC.
 
 ## Symbol → file
 
 | Looking for | File |
 |-------------|------|
-| DOM IDs, IIFEs, dashboard cards, `boot()`, portals, dock, voice orb + text chat | `renderer.js` (`rmeVoiceAgentOrb` ~17301) |
+| DOM IDs, IIFEs, dashboard cards, `boot()`, portals, dock, voice orb + text chat | `renderer.js` |
 | Calendar, planner view, settings, wikilinks | `renderer-calendar.js`, `renderer-obsidian-view.js`, `renderer-settings.js`, `obsidian-links.js` |
 | Shell HTML/CSS, `#authGate`, `#appMain` | `index.html` |
 | Script load chain | `boot-launch.js` |
@@ -21,10 +21,14 @@ Full detail + audit backlog: NAVIGATION.md · Agent rules: AGENTS.md · Portals:
 | `contextBridge`, `teacherAuth`, `voiceApi` | `preload.js` |
 | Admin email allowlist | `auth-store.js` |
 | Voice orchestration (not IPC registration) | `lib/voice-agent.js` |
+| STT engine routing (Parakeet vs Whisper) | `lib/voice-agent/stt-router.js` |
+| Parakeet Python sidecar (CUDA STT) | `lib/voice-agent/parakeet-server.js` |
+| Whisper exe lifecycle (CPU fallback) | `lib/voice-agent/whisper-server.js` |
 | TTS Chatterbox only | `lib/tts/chatterbox.js`, `lib/tts/index.js` |
-| Whisper exe lifecycle | `lib/voice-agent/whisper-server.js` |
 | Voice paths / `.env` | `lib/voice-env-resolve.js` |
 | Chatterbox Python sidecar | `tools/tts/chatterbox-server.py` |
+| Parakeet Python server | `tools/stt/parakeet-server.py` |
+| Silero VAD Python server | `tools/vad/vad-server.py` |
 | Whisper/ffmpeg (gitignored) | `tools/voice/` |
 | Notion REST + Claude tools | `lib/notion-api.js` |
 | Payslip table helpers | `notion-simplify.js` (root) |
@@ -38,39 +42,45 @@ Full detail + audit backlog: NAVIGATION.md · Agent rules: AGENTS.md · Portals:
 | Postgres schema | `supabase/migrations/` |
 | Env bake for dist | `scripts/bake-supabase-public-env.cjs` |
 
-## Line anchors (`wc -l`)
+## Line anchors (2026-05-29)
 
 | File | Lines |
 |------|------:|
-| `main.js` | 3398 |
-| `preload.js` | 1518 |
-| `index.html` | 13487 |
-| `renderer.js` | 34048 |
+| `main.js` | 3410 |
+| `preload.js` | 1455 |
+| `index.html` | 13474 |
+| `renderer.js` | 32920 |
 
-`renderer.js`: `isTeacherNavMode` 8439 · `toggleTheme` 18091 · `showAppPage` 22801 · `enterAdminApp` 32573 · `enterTeacherApp` 32794 · `boot` 32885
-
-## Security (`main.js` ~1857)
+## Security (`main.js` ~1869)
 
 `contextIsolation: true` · `nodeIntegration: false` · **`sandbox: false`** — do not flip without testing
 
 ## Voice IPC (`main.js`)
 
-| Handle | Line |
-|--------|-----:|
-| `voice:warm-tts` | 2853 |
-| `voice:transcribe` | 2864 |
-| `voice:ask-claude` | 2875 |
-| `voice:speak` | 2896 |
-| `voice:assistant-turn` | 2903 |
-| `voice:set-voice` / `voice:get-voice` | 3234 / 3247 |
+| Handle | Notes |
+|--------|-------|
+| `voice:status` | TTS + STT readiness |
+| `voice:system-prompt` | Claude system prompt |
+| `voice:vad-port` | VAD WebSocket URL |
+| `voice:warm-tts` | warm TTS + STT stack |
+| `voice:transcribe` | audio → text via STT router |
+| `voice:ask-claude` | Claude completion |
+| `voice:speak` | TTS synthesis |
+| `voice:assistant-turn` | Claude + streaming TTS |
+| `voice:set-voice` / `voice:get-voice` | TTS voice selection |
+| `voice:start-wake-word-listening` | begin wake-word detection |
+| `voice:stop-wake-word-listening` | end wake-word detection |
+| `voice:detect-wake-word` | check audio for "hey Retron" |
+| `voice:detect-stop-command` | check text for "go to sleep" |
 
-Events: `voice:tts-chunk` 3211 · `voice:claude-delta` — Warm: `voice:warm-tts` only
+Events: `voice:tts-chunk` · `voice:claude-delta` — Warm: `voice:warm-tts` only
 
 ## Traps
 
 - `lib/tts/cartesia.js` in package.json build.files — missing file
 - `components/ui/` — unused
 - Two `notion-simplify.js` — different exports
+- **Never use `process.env` in `renderer.js`** — `process` is undefined in Electron renderer (`contextIsolation: true`, `nodeIntegration: false`). Use hardcoded defaults or expose config via preload bridge IPC.
 
 ## Edit discipline
 

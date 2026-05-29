@@ -2116,13 +2116,19 @@ if (!gotTheLock) {
     seedPackagedEnvTemplate(userDataPath);
     loadDotenv();
     applyVoiceEnvPaths(__dirname);
-    void getVoiceAgent().warmVoiceStack().then(() => {
-      console.log("[voice] Voice stack fully warmed (TTS + STT).");
-    }).catch((e) => {
+    try {
+      void getVoiceAgent().warmVoiceStack().then(() => {
+        console.log("[voice] Voice stack fully warmed (TTS + STT).");
+      }).catch((e) => {
+        console.warn(
+          `[voice] background warm failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+    } catch (e) {
       console.warn(
-        `[voice] background warm failed: ${e instanceof Error ? e.message : String(e)}`,
+        `[voice] getVoiceAgent threw during init (non-fatal): ${e instanceof Error ? e.message : String(e)}`,
       );
-    });
+    }
     void spawnVadSidecar();
     warmReminderNotificationAssets();
 
