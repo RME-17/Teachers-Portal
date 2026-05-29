@@ -3262,8 +3262,9 @@ ipcMain.handle('dream:reset', async () => {
         _lastKnownSpeaker = detectedSpeaker;
       }
 
+      let retrievalResult = null;
       if (lastUserMsg) {
-        const retrievalResult = await Promise.race([
+        retrievalResult = await Promise.race([
           retrievalPipeline.retrieve({ userEmail: ALLOWED_ADMIN_EMAIL, query: lastUserMsg, k: 10, confidenceThreshold: 0.4, staleDays: 90 }),
           new Promise(resolve => setTimeout(() => resolve({ facts: [], pageRefs: [], memories: [], staleFacts: [], writeStaleFacts: [], temporalSummary: null, temporalConversations: [] }), 700)),
         ]);
@@ -3310,10 +3311,11 @@ ipcMain.handle('dream:reset', async () => {
       }
 
       /* Inject facts and page refs from retrieval pipeline result (no duplicate queries) */
-      let fallbackFacts = Array.isArray(retrievalResult.facts) ? retrievalResult.facts.slice(0, 30) : [];
-      const fallbackRefs = Array.isArray(retrievalResult.pageRefs) ? retrievalResult.pageRefs.slice(0, 30) : [];
+      const rr = retrievalResult || {};
+      let fallbackFacts = Array.isArray(rr.facts) ? rr.facts.slice(0, 30) : [];
+      const fallbackRefs = Array.isArray(rr.pageRefs) ? rr.pageRefs.slice(0, 30) : [];
 
-      if (!retrievalResult.facts && !retrievalResult.pageRefs) {
+      if (!rr.facts && !rr.pageRefs) {
         const [ff, rf] = await Promise.all([
           voiceMemory.listFacts({ userEmail: ALLOWED_ADMIN_EMAIL, userName: detectedSpeaker }),
           pageMemory.listPageRefs({ userEmail: ALLOWED_ADMIN_EMAIL }),
