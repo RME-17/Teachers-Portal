@@ -18909,8 +18909,15 @@ function setAssistantBubbleText(bubble, text) {
       if (voicePlayQueue.length === 0) return;
       voicePlaying = true;
       const { source, ctx } = voicePlayQueue.shift();
-      const startAt = ctx.currentTime + 0.005;
-      source.start(startAt);
+      try {
+        const startAt = ctx.currentTime + 0.005;
+        source.start(startAt);
+      } catch (e) {
+        console.warn("[voice] source.start failed:", e instanceof Error ? e.message : String(e));
+        voicePlaying = false;
+        processVoicePlayQueue();
+        return;
+      }
       activeVoiceSources.add(source);
       source.onended = () => {
         activeVoiceSources.delete(source);
@@ -19011,13 +19018,15 @@ function setAssistantBubbleText(bubble, text) {
       voiceScheduleChain = voiceScheduleChain
         .catch(() => {})
         .then(async () => {
+          try {
           const bytes =
             ttsBytesFromPayload(tts.audio) ||
             (typeof tts.audioBase64 === "string" && tts.audioBase64.length
               ? ttsBytesFromPayload(tts.audioBase64)
               : null);
           if (!bytes || bytes.length <= 44) {
-            throw new Error("No playable audio from TTS.");
+            console.warn("[voice] TTS chunk " + tts.index + " has no playable audio (" + (bytes ? bytes.length : 0) + " bytes)");
+            return;
           }
           logWavIntegrity(bytes, tts.index);
           const ctx = getVoiceAudioContext();
@@ -19049,6 +19058,9 @@ function setAssistantBubbleText(bubble, text) {
           voiceChunksPending++;
           voicePlayQueue.push({ source, ctx });
           processVoicePlayQueue();
+          } catch (e) {
+            console.warn("[voice] TTS schedule error for chunk " + tts.index + ":", e instanceof Error ? e.message : String(e));
+          }
         });
       return voiceScheduleChain;
     }
