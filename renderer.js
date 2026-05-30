@@ -19209,7 +19209,7 @@ function setAssistantBubbleText(bubble, text) {
       orb.dataset.state = "off";
       orb.innerHTML = MIC_SVG;
       stack.appendChild(orb);
-    } else if (orb.parentElement !== stack) {
+    } else if (orb.parentElement !== stack && !document.getElementById("rmeVmcOrbArea")?.contains(orb)) {
       stack.appendChild(orb);
     }
     wireOrb(/** @type {HTMLButtonElement} */ (orb));
@@ -19234,7 +19234,8 @@ function setAssistantBubbleText(bubble, text) {
       stack.hidden = true;
       return;
     }
-    stack.hidden = false;
+    const orbInHero = document.getElementById("rmeVmcOrbArea")?.contains(document.getElementById(ORB_ID));
+    stack.hidden = orbInHero;
     const orb = document.getElementById(ORB_ID);
     if (orb instanceof HTMLElement) orb.hidden = false;
     if (!st.warmed) void warmVoiceInBackground();
@@ -19437,8 +19438,6 @@ function setAppTheme(theme) {
 		if (stack instanceof HTMLElement) stack.hidden = !active;
 		const settingsToggle = document.getElementById("rmeVoiceSettingsToggle");
 		if (settingsToggle instanceof HTMLElement) settingsToggle.hidden = !active;
-		const heroStage = document.getElementById("rmeVmcHeroStage");
-		if (heroStage instanceof HTMLElement) heroStage.hidden = !active;
 	}
 
 	function startObserving() {
@@ -19491,7 +19490,7 @@ function setAppTheme(theme) {
     el.removeAttribute("aria-hidden");
     el.classList.add(MOUNT_CLASS);
     el.innerHTML = buildHtml();
-    buildHeroStage(el);
+    moveOrbIntoHero();
     wireControls();
     wireTranscript();
     wireChatInput();
@@ -19507,6 +19506,21 @@ function setAppTheme(theme) {
           '<div class="rme-vmc-summary-lines" id="rmeVmcSummaryLines">',
             '<span>Speaking with: --</span>',
             '<span>Listening with: --</span>',
+          '</div>',
+        '</section>',
+
+        '<section class="rme-vmc-card rme-vmc-card--hero">',
+          '<div class="rme-vmc-master-badge" id="rmeVmcMasterBadge">Voice System: --</div>',
+          '<div class="rme-vmc-orb-area" id="rmeVmcOrbArea"></div>',
+          '<span class="rme-vmc-state-label" id="rmeVmcStateLabel">Asleep</span>',
+          '<span class="rme-vmc-state-hint" id="rmeVmcStateHint">Say "ready for launch"</span>',
+          '<div class="rme-vmc-hero-controls">',
+            '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcWakeBtn">Wake</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcStopSpeakingBtn">Stop Speaking</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--toggle rme-vmc-btn--on" id="rmeVmcBargeinBtn">Barge-in: On</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcReconnectBtn">Reconnect</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcTestVoiceBtn">Test Voice</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcClearTranscriptBtn">Clear Transcript</button>',
           '</div>',
         '</section>',
 
@@ -19540,9 +19554,6 @@ function setAppTheme(theme) {
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Uptime</span><span class="rme-vmc-perf-value" id="rmeVmcPerfUptime">--</span></div>',
           '</div>',
         '</section>',
-
-        '<section class="rme-vmc-card rme-vmc-card--hero" hidden aria-hidden="true"></section>',
-        '<section class="rme-vmc-card rme-vmc-card--controls" hidden aria-hidden="true"></section>',
       '</div>',
     ].join("");
   }
@@ -19556,29 +19567,6 @@ function setAppTheme(theme) {
     if (stack) stack.hidden = true;
     const settingsToggle = document.getElementById("rmeVoiceSettingsToggle");
     if (settingsToggle) settingsToggle.hidden = true;
-  }
-
-  function buildHeroStage(pageEl) {
-    const existing = document.getElementById("rmeVmcHeroStage");
-    if (existing) existing.remove();
-    const stage = document.createElement("div");
-    stage.id = "rmeVmcHeroStage";
-    stage.className = "rme-vmc-hero-stage";
-    stage.innerHTML = [
-      '<div class="rme-vmc-master-badge" id="rmeVmcMasterBadge">Voice System: --</div>',
-      '<div class="rme-vmc-hero-spacer"></div>',
-      '<span class="rme-vmc-state-label" id="rmeVmcStateLabel">Asleep</span>',
-      '<span class="rme-vmc-state-hint" id="rmeVmcStateHint">Say "ready for launch"</span>',
-      '<div class="rme-vmc-hero-controls">',
-        '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcWakeBtn">Wake</button>',
-        '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcStopSpeakingBtn">Stop Speaking</button>',
-        '<button class="rme-vmc-btn rme-vmc-btn--toggle rme-vmc-btn--on" id="rmeVmcBargeinBtn">Barge-in: On</button>',
-        '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcReconnectBtn">Reconnect</button>',
-        '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcTestVoiceBtn">Test Voice</button>',
-        '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcClearTranscriptBtn">Clear Transcript</button>',
-      '</div>',
-    ].join("");
-    pageEl.appendChild(stage);
   }
 
   function wireControls() {
@@ -19966,6 +19954,7 @@ function setAppTheme(theme) {
   function onVisibilityChange() {
     if (isPageVisible()) {
       ensureMounted();
+      moveOrbIntoHero();
       if (!pollTimer) startPolling();
       setTimeout(hideFloatingChat, 500);
     } else {
@@ -19983,8 +19972,6 @@ function setAppTheme(theme) {
         const orb = document.getElementById("rmeVoiceOrbBtn");
         if (orb && orb.parentElement !== stack) stack.appendChild(orb);
       }
-      const heroStage = document.getElementById("rmeVmcHeroStage");
-      if (heroStage) heroStage.hidden = true;
     }
   }
 
