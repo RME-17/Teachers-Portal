@@ -17636,6 +17636,8 @@ setupAccountSecurityPanels();
   const WAKE_MIN_CHUNKS = 4;
   const WAKE_MIN_BYTES = 14000;
   const WAKE_CHECK_DEBOUNCE_MS = 3000;
+  let _vadDiagSilentOnce = false;
+  let _vadFramesSent_ts = 0;
   const VAD_SPEECH_THRESHOLD = 0.5;
   const VAD_MIN_SPEECH_MS = 250;
   const VAD_MIN_SILENCE_MS = 700;
@@ -17979,54 +17981,83 @@ function setAssistantBubbleText(bubble, text) {
        return "";
      }
 
-     async function connectVadServer() {
-       if (st.vadConnected && st.vadSocket && st.vadSocket.readyState === WebSocket.OPEN) return;
-       const api = window.voiceApi;
-       if (!api || typeof api.getVadPort !== "function") {
-         console.warn("[voice] VAD API unavailable");
-         return;
-       }
-       try {
-         const info = await api.getVadPort();
-         if (!info || !info.url) {
-           console.warn("[voice] VAD port not available");
-           return;
-         }
-         console.log("[voice] Connecting VAD to", info.url);
-         st.vadSocket = new WebSocket(info.url);
-         st.vadSocket.binaryType = "arraybuffer";
-         st.vadSocket.onopen = () => {
-           st.vadConnected = true;
-           console.log("[voice] VAD WebSocket connected");
-         };
-         st.vadSocket.onmessage = (ev) => {
-           try {
-             const data = JSON.parse(typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data));
-             if (typeof data.speech_prob === "number") {
-               st.vadSpeechProb = data.speech_prob;
-             }
-           } catch {}
-         };
-         st.vadSocket.onclose = () => {
-           st.vadConnected = false;
-           st.vadSocket = null;
-         };
-         st.vadSocket.onerror = () => {
-           st.vadConnected = false;
-         };
+      async function connectVadServer() {
+        if (st.vadConnected && st.vadSocket && st.vadSocket.readyState === WebSocket.OPEN) return;
+        const api = window.voiceApi;
+        if (!api || typeof api.getVadPort !== "function") {
+          console.warn("[voice] VAD API unavailable");
+          return;
+        }
+        try {
+          const info = await api.getVadPort();
+          if (!info || !info.url) {
+            console.warn("[voice] VAD port not available");
+            return;
+          }
+          // Clean up any previous socket before creating a new one
+          if (st.vadSocket) {
+            try { st.vadSocket.onclose = null; } catch {}
+            try { st.vadSocket.onerror = null; } catch {}
+            try { st.vadSocket.onopen = null; } catch {}
+            try { st.vadSocket.onmessage = null; } catch {}
+            try { st.vadSocket.close(); } catch {}
+            st.vadSocket = null;
+          }
+          st.vadConnected = false;
+          console.log("[voice] Connecting VAD to", info.url);
+          const sock = new WebSocket(info.url);
+          sock.binaryType = "arraybuffer";
+          sock.onopen = () => {
+            st.vadConnected = true;
+            console.log("[voice] VAD WebSocket connected");
+          };
+          sock.onmessage = (ev) => {
+            try {
+              const data = JSON.parse(typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data));
+              if (typeof data.speech_prob === "number") {
+                st.vadSpeechProb = data.speech_prob;
+                // Log first received frame & every ~3s thereafter
+                if (_vadFramesSent_ts === 0) {
+                  _vadFramesSent_ts = Date.now();
+                  console.log("[voice] VAD first frame received, prob=" + data.speech_prob.toFixed(3));
+                } else if (Date.now() - _vadFramesSent_ts > 3000) {
+                  _vadFramesSent_ts = Date.now();
+                  console.log("[voice] VAD frames flowing, prob=" + data.speech_prob.toFixed(3) + " phase=" + st.voicePhase);
+                }
+              }
+            } catch {}
+          };
+          sock.onclose = () => {
+            if (st.vadSocket === sock) {
+              st.vadConnected = false;
+              st.vadSocket = null;
+            }
+          };
+          sock.onerror = () => {
+            if (st.vadSocket === sock) {
+              st.vadConnected = false;
+            }
+          };
+          st.vadSocket = sock;
        } catch (e) {
          console.warn("[voice] VAD connect failed:", e);
        }
      }
 
-     function disconnectVadServer() {
-       if (st.vadSocket) {
-         try { st.vadSocket.close(); } catch {}
-         st.vadSocket = null;
-       }
-       st.vadConnected = false;
-       st.vadSpeechProb = 0;
-     }
+      function disconnectVadServer() {
+        if (st.vadSocket) {
+          try { st.vadSocket.onclose = null; } catch {}
+          try { st.vadSocket.onerror = null; } catch {}
+          try { st.vadSocket.onopen = null; } catch {}
+          try { st.vadSocket.onmessage = null; } catch {}
+          try { st.vadSocket.close(); } catch {}
+          st.vadSocket = null;
+        }
+        st.vadConnected = false;
+        st.vadSpeechProb = 0;
+        _vadFramesSent_ts = 0;
+        _vadDiagSilentOnce = false;
+      }
 
      function stopVadLoop() {
        disconnectVadServer();
@@ -18284,7 +18315,14 @@ function setAssistantBubbleText(bubble, text) {
         if (!st.vadProcessor) {
           st.vadProcessor = st.vadAudioCtx.createScriptProcessor(VAD_BUFFER_SIZE, 1, 1);
           st.vadProcessor.onaudioprocess = (ev) => {
-            if (!st.vadConnected || !st.vadSocket || st.vadSocket.readyState !== WebSocket.OPEN) return;
+            if (!st.vadConnected || !st.vadSocket || st.vadSocket.readyState !== WebSocket.OPEN) {
+              if (!_vadDiagSilentOnce) {
+                _vadDiagSilentOnce = true;
+                console.warn("[voice] VAD audio frames blocked — connected=" + st.vadConnected + " socketReady=" + (st.vadSocket ? st.vadSocket.readyState : "null"));
+              }
+              return;
+            }
+            _vadDiagSilentOnce = false;
             const input = ev.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
             const int16 = new Int16Array(input.length);

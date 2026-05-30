@@ -70,6 +70,8 @@ async def handle_health(websocket):
 async def handle_vad(websocket):
 	log.info("VAD client connected")
 	pcm_accum = bytearray()
+	frame_count = 0
+	_last_log_at = time.time()
 	try:
 		async for message in websocket:
 			if not isinstance(message, bytes):
@@ -78,9 +80,13 @@ async def handle_vad(websocket):
 			while len(pcm_accum) >= FRAME_BYTES:
 				frame = pcm_accum[:FRAME_BYTES]
 				pcm_accum = pcm_accum[FRAME_BYTES:]
+				frame_count += 1
 				pcm = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
 				tensor = torch.from_numpy(pcm).float().to(device)
 				prob = detect_speech(tensor)
+				if _last_log_at and time.time() - _last_log_at >= 5.0:
+					log.info("VAD frames: count=%d latest_prob=%.3f", frame_count, prob)
+					_last_log_at = time.time()
 				await websocket.send(json.dumps({"speech_prob": round(prob, 4)}))
 	except Exception:
 		pass
@@ -91,12 +97,18 @@ async def handle_vad(websocket):
 async def main():
 	async def process_request(connection, request):
 		"""Handle HTTP health check at the HTTP layer, before WebSocket upgrade."""
-		if request.path == "/health":
-			import http
-			body = json.dumps({"status": "ok", "model": "silero-vad", "device": device})
-			response = connection.respond(http.HTTPStatus.OK, body)
-			response.headers["Content-Type"] = "application/json"
-			return response
+		try:
+			log.info("process_request: path=%s", request.path)
+			if request.path == "/health":
+				import http
+				body = json.dumps({"status": "ok", "model": "silero-vad", "device": device})
+				response = connection.respond(http.HTTPStatus.OK, body)
+				response.headers["Content-Type"] = "application/json"
+				return response
+		except Exception as e:
+			log.warning("process_request error: %s", e)
+		# Explicitly return None to allow WebSocket upgrade
+		return None
 
 	async def route(websocket):
 		path = websocket.request.path if hasattr(websocket, "request") else "/"
