@@ -313,33 +313,37 @@ DEFAULT_VOICE_REF = args.voice_ref or os.path.join(
 )
 
 # --- Warmup synth to avoid cold-start on first real request ---
+def _do_warmup_pass(label):
+	t0 = time.time()
+	try:
+		if hasattr(model, 'generate'):
+			model.generate("warmup test")
+		elif hasattr(model, 'synthesize'):
+			model.synthesize("warmup test")
+		elif hasattr(model, 'tts'):
+			model.tts("warmup test")
+	except Exception:
+		try:
+			if hasattr(model, 'generate_stream'):
+				for _ in model.generate_stream("warmup test"):
+					pass
+		except Exception:
+			pass
+	if device == "cuda":
+		try:
+			torch.cuda.synchronize()
+		except Exception:
+			pass
+	elapsed = time.time() - t0
+	log.info("warmup %s done %.0fms", label, elapsed * 1000)
+
 try:
-    # Perform a short warmup generation synchronously so first real request isn't penalised
-    log.info("Starting warmup synth...")
-    w_t0 = time.time()
-    try:
-        # Some models expose a simple synth/api; we call generate to produce a short buffer
-        _ = model.generate("warmup") if hasattr(model, 'generate') else None
-    except Exception:
-        try:
-            # Fallback to the higher-level API if present (synthesize or tts)
-            if hasattr(model, 'synthesize'):
-                model.synthesize("warmup")
-            elif hasattr(model, 'tts'):
-                model.tts("warmup")
-        except Exception:
-            # As a last resort, attempt the turbo generate_stream invocation if available
-            try:
-                if hasattr(model, 'generate_stream'):
-                    # consume generator to force generation
-                    for _ in model.generate_stream("warmup"):
-                        pass
-            except Exception:
-                pass
-    w_t1 = time.time()
-    log.info("Warmup synth complete in %.3fs", w_t1 - w_t0)
+	log.info("Starting warmup synth (pass 1/2)...")
+	_do_warmup_pass("1/2")
+	log.info("Starting warmup synth (pass 2/2)...")
+	_do_warmup_pass("2/2")
 except Exception:
-    log.exception("Warmup synth failed")
+	log.exception("Warmup synth failed")
 
 def get_conditionals(ref_path: str, exaggeration: float):
     if ref_path not in _COND_CACHE:
@@ -680,6 +684,19 @@ async def speech(req: TTSRequest):
             raise HTTPException(status_code=400, detail="Invalid voice reference")
 
         log.info("synth start chars=%d", len(req.input))
+
+        # Log GPU device + utilisation snapshot BEFORE synthesis
+        gpu_sample_before = 0
+        vram_before = 0
+        if HAS_NVML:
+            try:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                gpu_sample_before = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                vram_before = pynvml.nvmlDeviceGetMemoryInfo(handle).used // (1024 * 1024)
+            except Exception:
+                pass
+        synth_t0 = time.time()
+
         # Ensure conditionals live on the same device as the T3 model to avoid
         # mixed-device tensor errors during T3 inference.
         if device == "cuda" and getattr(model, "conds", None) is not None:
@@ -883,6 +900,18 @@ async def speech(req: TTSRequest):
             cfg_weight=req.cfg_weight,
             temperature=req.temperature,
         )
+
+        synth_elapsed_ms = (time.time() - synth_t0) * 1000
+        gpu_after = 0
+        if HAS_NVML:
+            try:
+                gpu_after = pynvml.nvmlDeviceGetUtilizationRates(pynvml.nvmlDeviceGetHandleByIndex(0)).gpu
+            except Exception:
+                pass
+        log.info("synth done chars=%d device=%s t3_dtype=%s time=%dms gpu_before=%d%% gpu_after=%d%% vram=%dMB",
+            len(req.input), device,
+            str(getattr(getattr(model, 't3', None), 'dtype', '?')).split('.')[-1] if hasattr(model, 't3') else '?',
+            int(synth_elapsed_ms), gpu_sample_before, gpu_after, vram_before)
 
         if device == "cuda":
             try:
