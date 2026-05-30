@@ -19440,10 +19440,14 @@ function setAppTheme(theme) {
           '<div class="rme-vmc-perf-grid" id="rmeVmcPerfGrid">',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">TTS Latency</span><span class="rme-vmc-perf-value" id="rmeVmcPerfTts">-- ms</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">STT Speed</span><span class="rme-vmc-perf-value" id="rmeVmcPerfStt">-- ms</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">LLM TTFT</span><span class="rme-vmc-perf-value" id="rmeVmcPerfLlmTtft">-- ms</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">LLM Total</span><span class="rme-vmc-perf-value" id="rmeVmcPerfLlmTotal">-- ms</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">TTS TTFA</span><span class="rme-vmc-perf-value" id="rmeVmcPerfTtsTtfa">-- ms</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">GPU VRAM</span><span class="rme-vmc-perf-value" id="rmeVmcPerfGpu">-- MB</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">GPU Util</span><span class="rme-vmc-perf-value" id="rmeVmcPerfGpuUtil">--%</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">GPU Temp</span><span class="rme-vmc-perf-value" id="rmeVmcPerfGpuTemp">--°C</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">End-to-End Latency</span><span class="rme-vmc-perf-value" id="rmeVmcPerfE2e">-- ms</span></div>',
+            '<div class="rme-vmc-perf-cell" style="background:var(--rme-accent-light)"><span class="rme-vmc-perf-label">MicStop→First Audio</span><span class="rme-vmc-perf-value" id="rmeVmcPerfMicStop">-- ms</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Avg Turn Latency</span><span class="rme-vmc-perf-value" id="rmeVmcPerfAvgLatency">-- ms</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Turns</span><span class="rme-vmc-perf-value" id="rmeVmcPerfTurns">0</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Wake Events</span><span class="rme-vmc-perf-value" id="rmeVmcPerfWakes">0</span></div>',
@@ -19797,6 +19801,10 @@ function setAppTheme(theme) {
     const turnsEl = document.getElementById("rmeVmcPerfTurns");
     const wakesEl = document.getElementById("rmeVmcPerfWakes");
     const uptimeEl = document.getElementById("rmeVmcPerfUptime");
+    const llmTtftEl = document.getElementById("rmeVmcPerfLlmTtft");
+    const llmTotalEl = document.getElementById("rmeVmcPerfLlmTotal");
+    const ttsTtfaEl = document.getElementById("rmeVmcPerfTtsTtfa");
+    const micStopEl = document.getElementById("rmeVmcPerfMicStop");
 
     if (ttsEl && perf.lastTtsLatencyMs > 0) ttsEl.textContent = perf.lastTtsLatencyMs + " ms";
     if (sttEl) {
@@ -19823,6 +19831,10 @@ function setAppTheme(theme) {
       const m = Math.floor(s / 60);
       uptimeEl.textContent = m > 0 ? m + "m " + (s % 60) + "s" : s + "s";
     }
+    if (llmTtftEl) llmTtftEl.textContent = (perf.lastTurnLlmTtftMs > 0 ? perf.lastTurnLlmTtftMs + " ms" : "-- ms");
+    if (llmTotalEl) llmTotalEl.textContent = (perf.lastTurnLlmTotalMs > 0 ? perf.lastTurnLlmTotalMs + " ms" : "-- ms");
+    if (ttsTtfaEl) ttsTtfaEl.textContent = (perf.lastTurnTtsTtfaMs > 0 ? perf.lastTurnTtsTtfaMs + " ms" : "-- ms");
+    if (micStopEl) micStopEl.textContent = (perf.lastTurnMicStopToFirstAudioMs > 0 ? perf.lastTurnMicStopToFirstAudioMs + " ms" : "-- ms");
   }
 
   function hideFloatingChat() {
