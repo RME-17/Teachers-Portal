@@ -589,8 +589,8 @@
       /* ── Voice Mission Control v3 — Bento Grid ── */
       #notionWsPaneVoice .rme-vmc-bento {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        grid-template-rows: auto auto 1fr;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto 1fr;
         gap: 0.75rem;
         max-width: 60rem;
         margin: 0 auto;
@@ -604,11 +604,6 @@
         display: none;
       }
       @media (max-width: 56rem) {
-        #notionWsPaneVoice .rme-vmc-bento {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-      @media (max-width: 36rem) {
         #notionWsPaneVoice .rme-vmc-bento {
           grid-template-columns: 1fr;
         }
@@ -646,23 +641,18 @@
           0 12px 40px -4px rgba(0,0,0,0.3),
           0 0 44px -8px color-mix(in srgb, #3b82f6 14%, transparent);
       }
-      /* Hero — spans 2 rows, leftmost */
+      /* Hero — hidden (hero elements moved to fixed stage) */
       #notionWsPaneVoice .rme-vmc-card--hero {
-        grid-column: 1;
-        grid-row: 1 / 3;
-        align-items: center;
-        text-align: center;
-        padding: 1.2rem 1rem;
+        display: none;
       }
       @media (max-width: 56rem) {
         #notionWsPaneVoice .rme-vmc-card--hero {
-          grid-column: 1 / -1;
-          grid-row: auto;
+          display: none;
         }
       }
-      /* Dots — top center */
+      /* Dots — top band, full width */
       #notionWsPaneVoice .rme-vmc-card--dots {
-        grid-column: 2 / 4;
+        grid-column: 1 / -1;
         grid-row: 1;
       }
       @media (max-width: 56rem) {
@@ -671,21 +661,19 @@
           grid-row: auto;
         }
       }
-      /* Controls — fits under dots */
+      /* Controls — hidden (moved to hero stage) */
       #notionWsPaneVoice .rme-vmc-card--controls {
-        grid-column: 2 / 4;
-        grid-row: 2;
+        display: none;
       }
       @media (max-width: 56rem) {
         #notionWsPaneVoice .rme-vmc-card--controls {
-          grid-column: 1 / -1;
-          grid-row: auto;
+          display: none;
         }
       }
-      /* Transcript — wide, tall, main focus */
+      /* Transcript — left column */
       #notionWsPaneVoice .rme-vmc-card--transcript {
-        grid-column: 1 / 3;
-        grid-row: 3;
+        grid-column: 1;
+        grid-row: 2;
         min-height: 0;
         display: flex;
         flex-direction: column;
@@ -696,10 +684,10 @@
           grid-column: 1 / -1;
         }
       }
-      /* Performance — right sidebar / wide bottom */
+      /* Performance — right column */
       #notionWsPaneVoice .rme-vmc-card--perf {
-        grid-column: 3;
-        grid-row: 3;
+        grid-column: 2;
+        grid-row: 2;
       }
       @media (max-width: 56rem) {
         #notionWsPaneVoice .rme-vmc-card--perf {
@@ -802,6 +790,30 @@
       }
       html[data-theme="dark"] #notionWsPaneVoice .rme-vmc-state-hint {
         color: #9ca3af;
+      }
+      /* ── Hero Stage (fixed center, built around the orb) ── */
+      #notionWsPaneVoice .rme-vmc-hero-stage {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 10040;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.35rem;
+        pointer-events: none;
+      }
+      #notionWsPaneVoice .rme-vmc-hero-spacer {
+        height: 3.8rem;
+        flex-shrink: 0;
+      }
+      #notionWsPaneVoice .rme-vmc-hero-controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.35rem;
+        pointer-events: auto;
       }
       /* Dots grid */
       #notionWsPaneVoice .rme-vmc-dots-grid {
