@@ -19704,13 +19704,9 @@ function setAppTheme(theme) {
   function wireTranscript() {
     const api = window.voiceApi;
     if (!api) return;
-    if (typeof api.onTtsChunk === "function") {
-      api.onTtsChunk((detail) => {
-        if (detail && detail.text && detail.text.trim()) {
-          onAssistantChunk(detail.text.trim());
-        }
-      });
-    }
+    // Transcript text comes from Claude streaming deltas — do NOT also listen
+    // on onTtsChunk for text, or every sentence arrives twice (once via delta,
+    // once via TTS chunk text).
     if (typeof api.onClaudeDelta === "function") {
       api.onClaudeDelta((detail) => {
         if (detail && detail.text && detail.text.trim()) {
