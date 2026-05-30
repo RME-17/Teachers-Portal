@@ -19731,8 +19731,8 @@ function setAppTheme(theme) {
     // once via TTS chunk text).
     if (typeof api.onClaudeDelta === "function") {
       api.onClaudeDelta((detail) => {
-        if (detail && detail.text && detail.text.trim()) {
-          onAssistantChunk(detail.text.trim());
+        if (detail && detail.text) {
+          onAssistantChunk(detail.text);
         }
       });
     }
@@ -19760,7 +19760,7 @@ function setAppTheme(theme) {
       }
       while (feed.children.length > 40) feed.firstChild.remove();
     }
-    _assistantDom.querySelector(".rme-vmc-transcript-text").textContent = _assistantBuf;
+    _assistantDom.querySelector(".rme-vmc-transcript-text").textContent = _assistantBuf.replace(/\s{2,}/g, " ").trimStart();
     scrollTranscript();
   }
 
