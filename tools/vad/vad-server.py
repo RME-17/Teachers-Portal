@@ -89,6 +89,15 @@ async def handle_vad(websocket):
 
 
 async def main():
+	async def process_request(connection, request):
+		"""Handle HTTP health check at the HTTP layer, before WebSocket upgrade."""
+		if request.path == "/health":
+			import http
+			body = json.dumps({"status": "ok", "model": "silero-vad", "device": device})
+			response = connection.respond(http.HTTPStatus.OK, body)
+			response.headers["Content-Type"] = "application/json"
+			return response
+
 	async def route(websocket):
 		path = websocket.request.path if hasattr(websocket, "request") else "/"
 		if path == "/health":
@@ -96,7 +105,7 @@ async def main():
 		else:
 			await handle_vad(websocket)
 
-	async with serve(route, "127.0.0.1", args.port) as server:
+	async with serve(route, "127.0.0.1", args.port, process_request=process_request) as server:
 		log.info("VAD server listening on ws://127.0.0.1:%d", args.port)
 		await asyncio.get_running_loop().create_future()
 
