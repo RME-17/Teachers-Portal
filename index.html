@@ -578,7 +578,7 @@
       #notionWsPaneVoice .rme-voice-page {
         flex: 1;
         min-height: 0;
-        overflow: hidden;
+        overflow: visible;
         padding: 0.85rem 1rem;
         display: flex;
         flex-direction: column;
@@ -596,8 +596,9 @@
         max-width: 64rem;
         margin: 0 auto;
         width: 100%;
-        height: 100%;
+        flex: 1;
         min-height: 0;
+        padding-bottom: 2rem;
       }
       #notionWsPaneVoice .rme-vmc-bento-spacer {
         grid-column: 1 / -1;
@@ -684,7 +685,8 @@
       #notionWsPaneVoice .rme-vmc-card--transcript {
         grid-column: 1 / -1;
         grid-row: 3;
-        min-height: 0;
+        align-self: stretch;
+        min-height: 5rem;
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -699,6 +701,43 @@
       #notionWsPaneVoice .rme-vmc-card--perf {
         grid-column: 3;
         grid-row: 2;
+        max-height: 22rem;
+        overflow-y: auto;
+        transition: max-height 0.25s ease;
+      }
+      #notionWsPaneVoice .rme-vmc-card--perf[data-collapsed="true"] {
+        max-height: 2.6rem;
+        overflow-y: hidden;
+      }
+      #notionWsPaneVoice .rme-vmc-perf-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      #notionWsPaneVoice .rme-vmc-perf-header .rme-vmc-section-heading {
+        margin: 0;
+      }
+      #notionWsPaneVoice .rme-vmc-perf-toggle {
+        background: transparent;
+        border: none;
+        color: #64748b;
+        cursor: pointer;
+        padding: 0.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        transition: transform 0.2s ease, background 0.15s ease;
+      }
+      html[data-theme="dark"] #notionWsPaneVoice .rme-vmc-perf-toggle {
+        color: #94a3b8;
+      }
+      #notionWsPaneVoice .rme-vmc-perf-toggle:hover {
+        background: color-mix(in srgb, #000 6%, transparent);
+      }
+      #notionWsPaneVoice .rme-vmc-card--perf[data-collapsed="true"] .rme-vmc-perf-toggle svg {
+        transform: rotate(180deg);
       }
       @media (max-width: 60rem) {
         #notionWsPaneVoice .rme-vmc-card--perf {

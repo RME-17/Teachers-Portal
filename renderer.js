@@ -18075,10 +18075,7 @@ function setAssistantBubbleText(bubble, text) {
          try { st.vadMicSourceNode.disconnect(); } catch {}
          st.vadMicSourceNode = null;
        }
-       if (st.vadAudioCtx) {
-         try { st.vadAudioCtx.close(); } catch {}
-         st.vadAudioCtx = null;
-       }
+       /* Keep vadAudioCtx alive — closing it destroys AEC state and silences post-wake mic */
        st.vadSpeechActive = false;
        st.vadSpeechMs = 0;
        st.vadSilenceMs = 0;
@@ -18520,6 +18517,10 @@ function setAssistantBubbleText(bubble, text) {
      async function endVoiceSession() {
        st.voicePhase = "off";
        stopVadLoop();
+       if (st.vadAudioCtx) {
+         try { st.vadAudioCtx.close(); } catch {}
+         st.vadAudioCtx = null;
+       }
        st.vadUtterancePcmChunks = null;
        st.vadUtteranceActive = false;
        st.vadTrailingPadRemaining = 0;
@@ -19365,12 +19366,7 @@ function setAppTheme(theme) {
     panel.id = "rmeVoiceSettingsPanel";
     panel.innerHTML = [
       '<h4>Voice Settings</h4>',
-      '<div class="rme-vs-group">Male</div>',
-      '<button class="rme-vs-opt" data-voice="aaron">Aaron (British)</button>',
-      '<button class="rme-vs-opt" data-voice="andy">Andy (American)</button>',
-      '<div class="rme-vs-group">Female</div>',
-      '<button class="rme-vs-opt" data-voice="abigail">Abigail (American)</button>',
-      '<button class="rme-vs-opt" data-voice="lucy">Lucy (British)</button>',
+      '<button class="rme-vs-opt rme-vs-active" data-voice="jennifer-english">Jennifer English (American)</button>',
     ].join("");
     wrapper.appendChild(panel);
 
@@ -19535,8 +19531,13 @@ function setAppTheme(theme) {
           '</div>',
         '</section>',
 
-        '<section class="rme-vmc-card rme-vmc-card--perf">',
-          '<h3 class="rme-vmc-section-heading">Performance</h3>',
+        '<section class="rme-vmc-card rme-vmc-card--perf" id="rmeVmcPerfCard">',
+          '<div class="rme-vmc-perf-header">',
+            '<h3 class="rme-vmc-section-heading">Performance</h3>',
+            '<button class="rme-vmc-perf-toggle" id="rmeVmcPerfToggle" title="Toggle performance panel">',
+              '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>',
+            '</button>',
+          '</div>',
           '<div class="rme-vmc-perf-grid" id="rmeVmcPerfGrid">',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">TTS Latency</span><span class="rme-vmc-perf-value" id="rmeVmcPerfTts">-- ms</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">STT Speed</span><span class="rme-vmc-perf-value" id="rmeVmcPerfStt">-- ms</span></div>',
@@ -19674,6 +19675,16 @@ function setAppTheme(theme) {
         }
         _assistantBuf = "";
         _assistantDom = null;
+      });
+    }
+
+    const perfToggleBtn = document.getElementById("rmeVmcPerfToggle");
+    if (perfToggleBtn) {
+      perfToggleBtn.addEventListener("click", () => {
+        const perfCard = document.getElementById("rmeVmcPerfCard");
+        if (!perfCard) return;
+        const isCollapsed = perfCard.getAttribute("data-collapsed") === "true";
+        perfCard.setAttribute("data-collapsed", isCollapsed ? "false" : "true");
       });
     }
 

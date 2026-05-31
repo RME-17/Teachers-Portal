@@ -309,7 +309,7 @@ executor = ThreadPoolExecutor(max_workers=2)
 # Cache for voice conditionals
 _COND_CACHE = {}
 DEFAULT_VOICE_REF = args.voice_ref or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "voices", "aaron.wav"
+    os.path.dirname(os.path.abspath(__file__)), "voices", "jennifer.wav"
 )
 
 # --- Warmup synth to avoid cold-start on first real request ---
@@ -346,10 +346,13 @@ except Exception:
 	log.exception("Warmup synth failed")
 
 def get_conditionals(ref_path: str, exaggeration: float):
+    """Load voice conditionals from ref_path.
+    Returns model.conds on success, \"builtin\" to signal built-in default, None on error."""
     if ref_path not in _COND_CACHE:
         if not os.path.isfile(ref_path):
-            log.warning("Voice ref not found: %s", ref_path)
-            return None
+            log.info("[chatterbox] Jennifer voice via built-in default (American female, no ref file: %s)", ref_path)
+            return "builtin"
+        log.info("[chatterbox] Jennifer voice via reference file: %s", ref_path)
         log.info("Preparing conditionals for voice from %s", ref_path)
         # Ensure prepare_conditionals runs with CPU tensors/weights to avoid
         # mixed-device errors (input moved to CUDA while weights remain on CPU).
@@ -662,17 +665,14 @@ async def get_metrics():
 
 class TTSRequest(BaseModel):
     input: str
-    voice: str = "abigail"
+    voice: str = "jennifer-english"
     model: str = "tts-1"
     exaggeration: float = 0.35
     cfg_weight: float = 0.55
     temperature: float = 0.8
 
 VOICE_MAP = {
-    "aaron": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "aaron.wav"),
-    "andy": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "andy.wav"),
-    "abigail": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "abigail.wav"),
-    "lucy": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "lucy.wav"),
+    "jennifer-english": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "jennifer.wav"),
 }
 
 @app.post("/v1/audio/speech")
@@ -680,10 +680,16 @@ async def speech(req: TTSRequest):
     """Non-streaming endpoint: returns full WAV."""
     try:
         ref_path = VOICE_MAP.get(req.voice) or DEFAULT_VOICE_REF
-        if not get_conditionals(ref_path, req.exaggeration):
+        conds = get_conditionals(ref_path, req.exaggeration)
+        if conds is None:
             raise HTTPException(status_code=400, detail="Invalid voice reference")
+        use_builtin = conds == "builtin"
 
-        log.info("synth start chars=%d", len(req.input))
+        log.info("synth start chars=%d builtin=%s", len(req.input), use_builtin)
+
+        # When using built-in voice, clear any stale conditionals from a prior reference
+        if use_builtin:
+            model.conds = None
 
         # Log GPU device + utilisation snapshot BEFORE synthesis
         gpu_sample_before = 0
@@ -951,10 +957,16 @@ async def speech_stream(req: TTSRequest):
     """Streaming endpoint: returns raw PCM chunks (16-bit LE)."""
     try:
         ref_path = VOICE_MAP.get(req.voice) or DEFAULT_VOICE_REF
-        if not get_conditionals(ref_path, req.exaggeration):
+        conds = get_conditionals(ref_path, req.exaggeration)
+        if conds is None:
             raise HTTPException(status_code=400, detail="Invalid voice reference")
+        use_builtin = conds == "builtin"
 
-        log.info("stream start chars=%d", len(req.input))
+        log.info("stream start chars=%d builtin=%s", len(req.input), use_builtin)
+
+        # When using built-in voice, clear any stale conditionals from a prior reference
+        if use_builtin:
+            model.conds = None
 
         def stream_generator() -> Generator[bytes, None, None]:
             wav = None

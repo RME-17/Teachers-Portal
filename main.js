@@ -220,6 +220,7 @@ function getVoiceAgent() {
 			anthropicModelFast: process.env.RME_ANTHROPIC_MODEL_FAST,
 			claudePromptCache: process.env.RME_CLAUDE_PROMPT_CACHE !== "0",
 			persistAudioPath: path.join(app.getPath("userData"), "rme-voice-last.wav"),
+			fillerCacheDir: path.join(app.getPath("userData"), "voice-fillers"),
 		});
 	}
 	return _voiceAgent;
@@ -2124,6 +2125,13 @@ if (!gotTheLock) {
           `[voice] background warm failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
+      void getVoiceAgent().warmFillerClips().then((r) => {
+        if (r.ok) {
+          console.log(`[voice] Filler clips warmed: ${r.existed} cached, ${r.generated} generated / ${r.total}`);
+        }
+      }).catch((e) => {
+        console.warn(`[voice] filler warm failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
     } catch (e) {
       console.warn(
         `[voice] getVoiceAgent threw during init (non-fatal): ${e instanceof Error ? e.message : String(e)}`,
@@ -2142,19 +2150,12 @@ if (!gotTheLock) {
       svc.setUserEmail(ALLOWED_ADMIN_EMAIL);
     })();
 
-    /* Load persisted voice preference */
+    /* Load persisted voice preference — always force Jennifer English as the only voice */
     try {
-      const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
-      if (fs.existsSync(voiceConfigPath)) {
-        const raw = fs.readFileSync(voiceConfigPath, "utf8");
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.voice === "string" && parsed.voice.trim()) {
-          const { setVoice } = require("./lib/tts/index");
-          if (typeof setVoice === "function") setVoice(parsed.voice.trim());
-        }
-      }
+      const { setVoice } = require("./lib/tts/index");
+      if (typeof setVoice === "function") setVoice("jennifer-english");
     } catch (e) {
-      /* ignore corrupt file */
+      /* ignore */
     }
 
     log.info("notion", { tokenSet: !!process.env.NOTION_TOKEN, status: "ready" });
@@ -3846,35 +3847,20 @@ ipcMain.handle('dream:reset', async () => {
       return turnResult;
     });
 
-    /* --- Voice config IPC (preset selection, no restart needed) --- */
+    /* --- Voice config IPC (preset selection, no restart needed) — Jennifer English is the only voice --- */
     ipcMain.handle("voice:set-voice", async (_evt, payload) => {
-      const name = payload && typeof payload.name === "string" ? payload.name.trim() : "";
-      if (!name) return { ok: false, error: "Voice name required" };
       const { setVoice } = require("./lib/tts/index");
       if (typeof setVoice !== "function") return { ok: false, error: "TTS not initialized" };
-      setVoice(name);
+      setVoice("jennifer-english");
       const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
       try {
-        fs.writeFileSync(voiceConfigPath, JSON.stringify({ voice: name }), "utf8");
+        fs.writeFileSync(voiceConfigPath, JSON.stringify({ voice: "jennifer-english" }), "utf8");
       } catch {}
-      console.log(`[voice] voice set to "${name}"`);
+      console.log(`[voice] voice set to "jennifer-english"`);
       return { ok: true };
     });
     ipcMain.handle("voice:get-voice", () => {
-      const { getTtsVoice } = require("./lib/tts/index");
-      if (typeof getTtsVoice === "function") return { ok: true, voice: getTtsVoice() };
-      /* fallback: read from disk */
-      try {
-        const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
-        if (fs.existsSync(voiceConfigPath)) {
-          const raw = fs.readFileSync(voiceConfigPath, "utf8");
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed.voice === "string" && parsed.voice.trim()) {
-            return { ok: true, voice: parsed.voice.trim() };
-          }
-        }
-      } catch {}
-      return { ok: true, voice: "aaron" };
+      return { ok: true, voice: "jennifer-english" };
     });
 
     /* --- Memory IPC handlers (admin-only) --- */
