@@ -3393,14 +3393,39 @@ ipcMain.handle('dream:reset', async () => {
         userEmail: ALLOWED_ADMIN_EMAIL,
         maxTokens: 500,
         userName: detectedSpeaker,
+        currentCid: cid,
       });
       if (digestResult.ok && digestResult.data) {
         contextBlocks.push(digestResult.data);
-        log.info("memory", { autoContextDigest: digestResult.data.length, cid });
+        const hasTurns = digestResult.data.includes("## Memory: Recent conversation");
+        const hasSummaries = digestResult.data.includes("## Memory: Recent sessions");
+        const hasFacts = digestResult.data.includes("## Memory: What I know");
+        console.log(`[memory] injecting: digestLen=${digestResult.data.length} turns=${hasTurns} summaries=${hasSummaries} facts=${hasFacts} cid=${cid}`);
+      } else {
+        console.warn(`[memory] WARNING: digest injection SKIPPED — ok=${digestResult.ok} dataLen=${digestResult.data ? digestResult.data.length : 0} cid=${cid}`);
       }
+
+      // Emit memory snapshot to renderer for live panel
+      try {
+        if (!sender.isDestroyed()) {
+          const counts = digestResult.counts || {};
+          sender.send("voice:memory-snapshot", {
+            injected: digestResult.ok && Boolean(digestResult.data),
+            currentTurns: counts.currentTurns || 0,
+            priorSessionTurns: counts.priorSessionTurns || 0,
+            summaries: counts.summaries || 0,
+            facts: counts.facts || 0,
+            tokens: counts.tokens || 0,
+            preview: (digestResult.data || "").slice(0, 200),
+            ts: Date.now(),
+          });
+        }
+      } catch { /* non-fatal */ }
 
       if (contextBlocks.length > 0) {
         systemText = contextBlocks.join("\n\n") + "\n\n" + systemText;
+        const hasMemory = systemText.includes("## Memory:");
+        console.log(`[memory] system prompt assembled: len=${systemText.length} memoryPresent=${hasMemory} cid=${cid}`);
       }
 
       /* --- Recent conversation history from Supabase (persistent context across sessions) --- */

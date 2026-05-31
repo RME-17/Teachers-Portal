@@ -17643,8 +17643,8 @@ setupAccountSecurityPanels();
   let _bargeinDiag_ts = 0;
   const VAD_SPEECH_THRESHOLD = 0.5;
   const VAD_MIN_SPEECH_MS = 250;
-  const VAD_MIN_SILENCE_MS = 700;
-  const VAD_SPEECH_PAD_MS = 300;
+  const VAD_MIN_SILENCE_MS = 1500; // longer pause before finalizing turn (was 700, too short)
+  const VAD_SPEECH_PAD_MS = 400; // trailing audio pad after speech ends (was 300)
   const VAD_MAX_UTTERANCE_MS = 45000;
   const VAD_SAMPLE_RATE = 16000;
   const VAD_BUFFER_SIZE = 512;
@@ -18977,10 +18977,14 @@ function setAssistantBubbleText(bubble, text) {
 
       const { source } = voicePlayQueue.shift();
 
-      // Continuous clock: schedule where the last chunk ends, or now if first chunk
+      // Continuous clock: first chunk starts 100ms in future to avoid browser clipping
       const now = ctx.currentTime;
-      if (_nextChunkStartTime < now) _nextChunkStartTime = now;
-      const startAt = _nextChunkStartTime + 0.002; // 2ms pad to avoid clock drift
+      if (_nextChunkStartTime <= 0) {
+        _nextChunkStartTime = now + 0.10; // 100ms lead on first chunk
+      } else if (_nextChunkStartTime < now) {
+        _nextChunkStartTime = now + 0.002;
+      }
+      const startAt = _nextChunkStartTime;
       source.connect(_voiceOutputGain);
 
       try {
@@ -19531,6 +19535,7 @@ function setAppTheme(theme) {
     moveOrbIntoHero();
     wireControls();
     wireTranscript();
+    wireMemory();
     wireChatInput();
     startPolling();
   }
@@ -19596,6 +19601,17 @@ function setAppTheme(theme) {
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Wake Events</span><span class="rme-vmc-perf-value" id="rmeVmcPerfWakes">0</span></div>',
             '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Uptime</span><span class="rme-vmc-perf-value" id="rmeVmcPerfUptime">--</span></div>',
           '</div>',
+        '</section>',
+        '<section class="rme-vmc-card rme-vmc-card--memory" id="rmeVmcMemoryCard">',
+          '<h3 class="rme-vmc-section-heading">Memory <span class="rme-vmc-memory-status" id="rmeVmcMemoryStatus">--</span></h3>',
+          '<div class="rme-vmc-memory-grid" id="rmeVmcMemoryGrid">',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Prior Session</span><span class="rme-vmc-perf-value" id="rmeVmcMemPrior">0</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Current Session</span><span class="rme-vmc-perf-value" id="rmeVmcMemCurrent">0</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Summaries</span><span class="rme-vmc-perf-value" id="rmeVmcMemSummaries">0</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Facts</span><span class="rme-vmc-perf-value" id="rmeVmcMemFacts">0</span></div>',
+            '<div class="rme-vmc-perf-cell"><span class="rme-vmc-perf-label">Tokens</span><span class="rme-vmc-perf-value" id="rmeVmcMemTokens">0</span></div>',
+          '</div>',
+          '<div class="rme-vmc-memory-preview" id="rmeVmcMemPreview" title="Digest preview"></div>',
         '</section>',
       '</div>',
     ].join("");
@@ -19738,6 +19754,29 @@ function setAppTheme(theme) {
       wakeBtn.textContent = asleep ? "Wake" : "Sleep";
       wakeBtn.classList.toggle("rme-vmc-btn--on", !asleep);
     }, 800);
+  }
+
+  function wireMemory() {
+    const api = window.voiceApi;
+    if (!api || typeof api.onMemorySnapshot !== "function") return;
+    const statusEl = document.getElementById("rmeVmcMemoryStatus");
+    const priorEl = document.getElementById("rmeVmcMemPrior");
+    const currentEl = document.getElementById("rmeVmcMemCurrent");
+    const summariesEl = document.getElementById("rmeVmcMemSummaries");
+    const factsEl = document.getElementById("rmeVmcMemFacts");
+    const tokensEl = document.getElementById("rmeVmcMemTokens");
+    const previewEl = document.getElementById("rmeVmcMemPreview");
+    if (!statusEl) return;
+    api.onMemorySnapshot((snap) => {
+      statusEl.textContent = snap.injected ? "Injected" : "Empty";
+      statusEl.className = "rme-vmc-memory-status rme-vmc-memory-status--" + (snap.injected ? "injected" : "empty");
+      if (priorEl) priorEl.textContent = snap.priorSessionTurns || 0;
+      if (currentEl) currentEl.textContent = snap.currentTurns || 0;
+      if (summariesEl) summariesEl.textContent = snap.summaries || 0;
+      if (factsEl) factsEl.textContent = snap.facts || 0;
+      if (tokensEl) tokensEl.textContent = snap.tokens || 0;
+      if (previewEl) previewEl.textContent = snap.preview || "";
+    });
   }
 
   function wireChatInput() {

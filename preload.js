@@ -223,6 +223,18 @@ contextBridge.exposeInMainWorld("voiceApi", {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  onMemorySnapshot: (handler) => {
+    const channel = "voice:memory-snapshot";
+    const listener = (_evt, detail) => {
+      try {
+        if (typeof handler === "function") handler(detail);
+      } catch {
+        /* ignore */
+      }
+    };
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
   setVoice: (name) => ipcRenderer.invoke("voice:set-voice", { name }),
   getVoice: () => ipcRenderer.invoke("voice:get-voice"),
   getHealthSnapshot: () => ipcRenderer.invoke("voice:health-snapshot"),

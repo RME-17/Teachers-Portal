@@ -578,38 +578,47 @@
       #notionWsPaneVoice .rme-voice-page {
         flex: 1;
         min-height: 0;
-        overflow: visible;
-        padding: 0.85rem 1rem;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
       }
       #notionWsPaneVoice .rme-voice-page-mount {
         display: none;
       }
-      /* ── Voice Mission Control v3 — Bento Grid ── */
+      /* ── Voice Mission Control v4 — Fixed Grid Shell ── */
       #notionWsPaneVoice .rme-vmc-bento {
         display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        grid-template-rows: auto auto 1fr;
-        align-items: start;
-        gap: 2rem;
-        max-width: 64rem;
-        margin: 0 auto;
+        grid-template-columns: minmax(220px, 320px) minmax(0, 1fr) minmax(220px, 320px);
+        grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr);
+        grid-template-areas:
+          "status   status    status"
+          "memory   voice     performance"
+          "memory   transcript performance";
+        gap: 20px;
+        padding: 24px;
+        padding-bottom: calc(72px + 24px + 64px); /* dock height + bottom margin + clearance */
         width: 100%;
-        flex: 1;
+        height: 100%;
+        box-sizing: border-box;
         min-height: 0;
-        padding-bottom: 2rem;
+        overflow-y: auto;
       }
       #notionWsPaneVoice .rme-vmc-bento-spacer {
-        grid-column: 1 / -1;
-        min-height: 0;
         display: none;
       }
-      @media (max-width: 60rem) {
+      @media (max-width: 68rem) {
         #notionWsPaneVoice .rme-vmc-bento {
           grid-template-columns: 1fr;
-          grid-template-rows: auto auto auto 1fr;
-          gap: 1rem;
+          grid-template-rows: auto auto minmax(200px, 1fr) auto auto;
+          grid-template-areas:
+            "status"
+            "voice"
+            "transcript"
+            "memory"
+            "performance";
+          gap: 12px;
+          padding: 12px;
+          padding-bottom: calc(72px + 24px + 64px);
         }
       }
       /* Shared card */
@@ -632,6 +641,9 @@
         padding: 1rem 1.1rem 1.05rem;
         display: flex;
         flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        overflow: hidden;
       }
       html[data-theme="dark"] #notionWsPaneVoice .rme-vmc-card {
         border: 1px solid color-mix(in srgb, #fff 16%, #64748b 12%);
@@ -645,65 +657,46 @@
           0 12px 40px -4px rgba(0,0,0,0.3),
           0 0 44px -8px color-mix(in srgb, #3b82f6 14%, transparent);
       }
-      /* Hero — center column, orb lane */
+      /* Grid area assignments */
+      #notionWsPaneVoice .rme-vmc-card--dots       { grid-area: status; }
+      #notionWsPaneVoice .rme-vmc-card--hero       { grid-area: voice; }
+      #notionWsPaneVoice .rme-vmc-card--transcript { grid-area: transcript; }
+      #notionWsPaneVoice .rme-vmc-card--perf       { grid-area: performance; }
+      #notionWsPaneVoice .rme-vmc-card--memory     { grid-area: memory; }
+      #notionWsPaneVoice .rme-vmc-card--controls   { display: none; }
+      /* Hero — fill center column */
       #notionWsPaneVoice .rme-vmc-card--hero {
-        grid-column: 2;
-        grid-row: 2;
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
         padding: 1.2rem 1.4rem;
-        width: max-content;
-        min-width: 14rem;
-        justify-self: center;
+        overflow-y: auto;
       }
-      @media (max-width: 60rem) {
-        #notionWsPaneVoice .rme-vmc-card--hero {
-          grid-column: 1;
-          grid-row: 2;
-          width: 100%;
-          justify-self: stretch;
-        }
+      @media (max-width: 68rem) {
+        #notionWsPaneVoice .rme-vmc-card--hero { width: 100%; }
       }
-      /* Dots — top band, full width */
-      #notionWsPaneVoice .rme-vmc-card--dots {
-        grid-column: 1 / -1;
-        grid-row: 1;
-      }
-      @media (max-width: 60rem) {
-        #notionWsPaneVoice .rme-vmc-card--dots {
-          grid-column: 1;
-          grid-row: 1;
-        }
-      }
-      /* Controls — hidden (buttons moved into hero card) */
-      #notionWsPaneVoice .rme-vmc-card--controls {
-        display: none;
-      }
-      /* Transcript — below the hero, full width */
-      #notionWsPaneVoice .rme-vmc-card--transcript {
-        grid-column: 1 / -1;
-        grid-row: 3;
-        align-self: stretch;
-        min-height: 5rem;
+      /* Transcript — scrollable inner region */
+      #notionWsPaneVoice .rme-vmc-transcript-feed {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
         display: flex;
         flex-direction: column;
-        overflow: hidden;
+        gap: 0.3rem;
+        padding: 0.35rem 0.5rem;
+        scrollbar-width: thin;
+        font-size: 0.72rem;
+        line-height: 1.35;
       }
-      @media (max-width: 60rem) {
-        #notionWsPaneVoice .rme-vmc-card--transcript {
-          grid-column: 1;
-          grid-row: 3;
-        }
-      }
-      /* Performance — right column */
+      /* Performance — spanning rows 2-3, scrollable */
       #notionWsPaneVoice .rme-vmc-card--perf {
-        grid-column: 3;
-        grid-row: 2;
-        max-height: 22rem;
         overflow-y: auto;
-        transition: max-height 0.25s ease;
+      }
+      @media (max-width: 68rem) {
+        #notionWsPaneVoice .rme-vmc-card--perf {
+          max-height: 18rem;
+        }
       }
       #notionWsPaneVoice .rme-vmc-card--perf[data-collapsed="true"] {
         max-height: 2.6rem;
@@ -714,6 +707,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 0.5rem;
+        flex-shrink: 0;
       }
       #notionWsPaneVoice .rme-vmc-perf-header .rme-vmc-section-heading {
         margin: 0;
@@ -738,12 +732,6 @@
       }
       #notionWsPaneVoice .rme-vmc-card--perf[data-collapsed="true"] .rme-vmc-perf-toggle svg {
         transform: rotate(180deg);
-      }
-      @media (max-width: 60rem) {
-        #notionWsPaneVoice .rme-vmc-card--perf {
-          grid-column: 1;
-          grid-row: 4;
-        }
       }
       #notionWsPaneVoice .rme-vmc-section-heading {
         font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1020,18 +1008,7 @@
         display: flex;
         flex-direction: column;
       }
-      #notionWsPaneVoice .rme-vmc-transcript-feed {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        padding: 0.35rem 0.5rem;
-        scrollbar-width: thin;
-        font-size: 0.72rem;
-        line-height: 1.35;
-      }
+      #notionWsPaneVoice .rme-vmc-chat-input-row {
       #notionWsPaneVoice .rme-vmc-transcript-empty {
         text-align: center;
         color: #9ca3af;
@@ -1149,6 +1126,39 @@
       }
       html[data-theme="dark"] #notionWsPaneVoice .rme-vmc-perf-value {
         color: #f8fafc;
+      }
+      /* Memory panel */
+      #notionWsPaneVoice .rme-vmc-card--memory {
+        grid-column: 1;
+        grid-row: 4;
+      }
+      #notionWsPaneVoice .rme-vmc-memory-status {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        margin-left: 0.4rem;
+        vertical-align: middle;
+        background: #9ca3af;
+      }
+      #notionWsPaneVoice .rme-vmc-memory-status--injected { background: #22c55e; }
+      #notionWsPaneVoice .rme-vmc-memory-status--empty { background: #ef4444; }
+      #notionWsPaneVoice .rme-vmc-memory-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 0.35rem 0.5rem;
+        margin-bottom: 0.4rem;
+      }
+      #notionWsPaneVoice .rme-vmc-memory-preview {
+        font-size: 0.6rem;
+        color: #64748b;
+        max-height: 3.6em;
+        overflow-y: auto;
+        line-height: 1.2;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      html[data-theme="dark"] #notionWsPaneVoice .rme-vmc-memory-preview {
+        color: #94a3b8;
       }
       @media (prefers-reduced-motion: reduce) {
         #notionWsPaneVoice .rme-vmc-dot--green {
