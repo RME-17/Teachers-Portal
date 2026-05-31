@@ -308,6 +308,7 @@ executor = ThreadPoolExecutor(max_workers=2)
 
 # Cache for voice conditionals
 _COND_CACHE = {}
+_COND_DEBUG_DONE = False
 DEFAULT_VOICE_REF = args.voice_ref or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "voices", "jennifer.wav"
 )
@@ -345,17 +346,103 @@ try:
 except Exception:
 	log.exception("Warmup synth failed")
 
+def _move_conds_to_device(conds, target_device):
+    """Brute-force recursive: move every torch.Tensor in the conds object graph to target_device."""
+    _move_recursive(conds, target_device, visited=set())
+
+def _move_recursive(obj, target_device, visited, depth=0):
+    if obj is None:
+        return
+    oid = id(obj)
+    if oid in visited:
+        return
+    visited.add(oid)
+    if isinstance(obj, torch.Tensor):
+        return
+    if isinstance(obj, dict):
+        for k, v in list(obj.items()):
+            if isinstance(v, torch.Tensor):
+                obj[k] = v.to(target_device)
+            else:
+                _move_recursive(v, target_device, visited, depth + 1)
+        return
+    if isinstance(obj, (list, tuple)):
+        lst = list(obj)
+        for i, v in enumerate(lst):
+            if isinstance(v, torch.Tensor):
+                lst[i] = v.to(target_device)
+            else:
+                _move_recursive(v, target_device, visited, depth + 1)
+        return
+    # Walk __dict__ first (stored attributes)
+    d = getattr(obj, '__dict__', None)
+    if d:
+        for attr_name, val in list(d.items()):
+            if isinstance(val, torch.Tensor):
+                try:
+                    setattr(obj, attr_name, val.to(target_device))
+                    if depth <= 1:
+                        log.info("[chatterbox] moved conds.%s to %s", attr_name, target_device)
+                except Exception:
+                    if depth <= 1:
+                        log.warning("[chatterbox] FAILED moving conds.%s", attr_name)
+            else:
+                _move_recursive(val, target_device, visited, depth + 1)
+    # Walk dir() for descriptor-based attributes
+    for attr_name in dir(obj):
+        if attr_name.startswith('_'):
+            continue
+        try:
+            val = getattr(obj, attr_name)
+        except Exception:
+            continue
+        if val is None or isinstance(val, (str, bytes, int, float, bool)):
+            continue
+        if isinstance(val, torch.Tensor):
+            try:
+                setattr(obj, attr_name, val.to(target_device))
+                if depth <= 1:
+                    log.info("[chatterbox] moved conds.%s (property) to %s", attr_name, target_device)
+            except Exception:
+                if depth <= 1:
+                    log.info("[chatterbox] skipped conds.%s (read-only property)", attr_name)
+        elif hasattr(val, '__dict__') or hasattr(val, '__slots__'):
+            _move_recursive(val, target_device, visited, depth + 1)
+        # Also walk objects that look like they might contain tensors
+        elif hasattr(val, 'to') or hasattr(val, 'dtype') or hasattr(val, 'device'):
+            _move_recursive(val, target_device, visited, depth + 1)
+    for attr_name in dir(obj):
+        if attr_name.startswith('_'):
+            continue
+        try:
+            val = getattr(obj, attr_name)
+        except Exception:
+            continue
+        if val is None or isinstance(val, (str, bytes, int, float, bool)):
+            continue
+        if isinstance(val, torch.Tensor):
+            try:
+                setattr(obj, attr_name, val.to(target_device))
+            except Exception:
+                pass
+        elif hasattr(val, '__dict__'):
+            _move_recursive(val, target_device, visited)
+
 def get_conditionals(ref_path: str, exaggeration: float):
     """Load voice conditionals from ref_path.
-    Returns model.conds on success, \"builtin\" to signal built-in default, None on error."""
+    Returns model.conds on success, \"builtin\" to signal built-in default, None on error.
+    Stores deep-copy in cache; restores by assigning the copy back whole."""
+    import copy
+    try:
+        model_device = next(model.parameters()).device
+    except Exception:
+        model_device = torch.device("cpu")
     if ref_path not in _COND_CACHE:
         if not os.path.isfile(ref_path):
-            log.info("[chatterbox] Jennifer voice via built-in default (American female, no ref file: %s)", ref_path)
+            log.info("[chatterbox] Jennifer voice via built-in default (ref file missing: %s)", ref_path)
+            _COND_CACHE[ref_path] = "builtin"
             return "builtin"
-        log.info("[chatterbox] Jennifer voice via reference file: %s", ref_path)
-        log.info("Preparing conditionals for voice from %s", ref_path)
-        # Ensure prepare_conditionals runs with CPU tensors/weights to avoid
-        # mixed-device errors (input moved to CUDA while weights remain on CPU).
+        log.info("[chatterbox] Preparing conditionals ONCE for voice from %s", ref_path)
         prev_model_device = getattr(model, "device", None)
         try:
             model.device = "cpu"
@@ -363,17 +450,58 @@ def get_conditionals(ref_path: str, exaggeration: float):
             if callable(prep):
                 prep(ref_path, exaggeration=exaggeration)
             else:
-                log.warning("prepare_conditionals is not callable; using existing conditionals if available")
+                log.warning("prepare_conditionals is not callable")
                 existing = getattr(model, "conds", None)
                 if existing is None:
                     return None
         finally:
-            # restore previous device flag so generation still knows target device
             if prev_model_device is not None:
                 model.device = prev_model_device
-        _COND_CACHE[ref_path] = model.conds
-    else:
-        model.conds = _COND_CACHE[ref_path]
+        # Move live conds to model device immediately (prepare_conditionals ran on CPU)
+        log.info("[chatterbox] Moving live conds to %s...", model_device)
+        _move_conds_to_device(getattr(model, "conds", None), model_device)
+        log.info("[chatterbox] Live conds moved to %s", model_device)
+        # Deep-copy the FULL Conditionals object once (copy.deepcopy handles tensors natively)
+        src = getattr(model, "conds", None)
+        if src is None:
+            log.error("[chatterbox] model.conds is None after prepare_conditionals")
+            return None
+        try:
+            saved = copy.deepcopy(src)
+            log.info("[chatterbox] Conditionals deep-copied to cache (type=%s)", type(src).__name__)
+        except Exception as e:
+            log.warning("[chatterbox] deepcopy failed: %s — falling back to per-call recompute", str(e))
+            _COND_CACHE[ref_path] = src
+            return src
+        _COND_CACHE[ref_path] = saved
+
+    cached = _COND_CACHE[ref_path]
+    if cached == "builtin":
+        return "builtin"
+
+    # Restore from cache — assign reference (deep-copy only on first store, not per-chunk)
+    if isinstance(cached, dict):
+        # Stale dict format from old cache — clear and recompute
+        _COND_CACHE.pop(ref_path, None)
+        return get_conditionals(ref_path, exaggeration)
+    try:
+        model.conds = cached
+    except Exception as e:
+        log.warning("[chatterbox] conds restore failed: %s — recomputing", str(e))
+        _COND_CACHE.pop(ref_path, None)
+        return get_conditionals(ref_path, exaggeration)
+    # Verify device matches model
+    try:
+        for attr_name in dir(model.conds):
+            if attr_name.startswith('_'):
+                continue
+            val = getattr(model.conds, attr_name, None)
+            if isinstance(val, torch.Tensor) and val.device != model_device:
+                log.warning("[chatterbox] conds tensor %s on %s != %s — fixing", attr_name, val.device, model_device)
+                _move_conds_to_device(model.conds, model_device)
+                break
+    except Exception:
+        pass
     return model.conds
 
 
@@ -597,9 +725,17 @@ def safe_generate(*args, **kwargs):
     """Call model.generate without silent CPU fallback — fail fast on errors."""
     try:
         return model.generate(*args, **kwargs)
-    except Exception:
-        # Log full traceback and re-raise to make failures loud and fast
-        log.exception("Generation error (failing fast)")
+    except Exception as e:
+        # Log full traceback to console AND to temp file
+        log.exception("safe_generate FAILED: %s", str(e))
+        try:
+            with open(os.path.join(os.getenv('LOCALAPPDATA', '.'), 'Temp', 'chatterbox_generate_error.log'), 'a', encoding='utf-8') as f:
+                import traceback
+                f.write('\n--- safe_generate error ---\n')
+                f.write(f'Exception: {type(e).__name__}: {e}\n')
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
         raise
 
 # FastAPI server
@@ -690,8 +826,6 @@ async def speech(req: TTSRequest):
         # When using built-in voice, clear any stale conditionals from a prior reference
         if use_builtin:
             model.conds = None
-
-        # Log GPU device + utilisation snapshot BEFORE synthesis
         gpu_sample_before = 0
         vram_before = 0
         if HAS_NVML:
@@ -703,201 +837,18 @@ async def speech(req: TTSRequest):
                 pass
         synth_t0 = time.time()
 
-        # Ensure conditionals live on the same device as the T3 model to avoid
-        # mixed-device tensor errors during T3 inference.
+        # Safety: ensure conditionals are on model device (backstop for cache edge cases)
         if device == "cuda" and getattr(model, "conds", None) is not None:
             try:
-                _move_tensors_in_obj(model.conds, "cuda")
-            except Exception:
-                log.warning("Failed to move conditionals to cuda; proceeding anyway")
-        # Dump short conds summary for debugging device/dtype mismatches
-        try:
-            conds = getattr(model, 'conds', None)
-            try:
-                log.info("conds type: %s", type(conds))
-                attrs = [a for a in dir(conds) if not a.startswith('_')][:40]
-                log.info("conds attrs: %s", attrs)
-                for a in attrs:
-                    try:
-                        v = getattr(conds, a)
-                        if hasattr(v, 'device') and hasattr(v, 'dtype'):
-                            log.info("cond.%s: %s dtype=%s device=%s", a, type(v).__name__, getattr(v, 'dtype', None), getattr(v, 'device', None))
-                        elif 'numpy' in str(type(v)):
-                            log.info("cond.%s: numpy shape=%s dtype=%s", a, getattr(v, 'shape', None), getattr(v, 'dtype', None))
-                        else:
-                            if isinstance(v, (list, tuple)) and len(v) > 0:
-                                log.info("cond.%s: %s first_type=%s", a, type(v).__name__, type(v[0]).__name__)
-                            else:
-                                log.info("cond.%s: %s", a, type(v).__name__)
-                    except Exception:
-                        log.exception("Error inspecting cond.%s", a)
-            except Exception:
-                log.exception("Error dumping conds top-level info")
-            # Ensure common token/index fields are CUDA long tensors for embedding
-            try:
-                if device == 'cuda' and conds is not None:
-                    for a in attrs:
-                        if 'token' in a.lower():
-                            try:
-                                v = getattr(conds, a)
-                                if v is None:
-                                    continue
-                                if not isinstance(v, torch.Tensor):
-                                    # numpy arrays or lists -> long tensor
-                                    if 'numpy' in str(type(v)) or isinstance(v, (list, tuple)):
-                                        t = torch.tensor(v, dtype=torch.long, device='cuda')
-                                        setattr(conds, a, t)
-                                else:
-                                    # ensure on cuda and long dtype
-                                    if v.device.type != 'cuda' or v.dtype != torch.long:
-                                        try:
-                                            setattr(conds, a, v.to('cuda').long())
-                                        except Exception:
-                                            setattr(conds, a, v.to('cuda'))
-                            except Exception:
-                                pass
-            except Exception:
-                log.exception("Failed to coerce conds token fields to CUDA")
-            # For T3 ensure speaker/prompt embeddings match T3 parameter dtype (robust)
-            try:
-                if device == 'cuda' and conds is not None and hasattr(model, 't3'):
-                    # determine target dtype from t3 parameters
-                    try:
-                        target_param = next(model.t3.parameters())
-                        target_dtype = getattr(target_param, 'dtype', None)
-                    except Exception:
-                        target_dtype = None
-                    for a in attrs:
-                        name = a.lower()
-                        if 'speaker' in name or 'spkr' in name or 'speech_emb' in name or 'prompt_speech_emb' in name or 'prompt' in name:
-                            try:
-                                v = getattr(conds, a)
-                                # numpy -> torch
-                                if 'numpy' in str(type(v)):
-                                    try:
-                                        t = torch.from_numpy(v)
-                                        if target_dtype is not None:
-                                            t = t.to(device='cuda', dtype=target_dtype)
-                                        else:
-                                            t = t.to('cuda')
-                                        setattr(conds, a, t)
-                                        continue
-                                    except Exception:
-                                        pass
-                                # lists/tuples -> torch
-                                if isinstance(v, (list, tuple)):
-                                    try:
-                                        t = torch.tensor(v)
-                                        if target_dtype is not None:
-                                            t = t.to(device='cuda', dtype=target_dtype)
-                                        else:
-                                            t = t.to('cuda')
-                                        setattr(conds, a, t)
-                                        continue
-                                    except Exception:
-                                        pass
-                                if isinstance(v, torch.Tensor):
-                                    try:
-                                        if target_dtype is not None:
-                                            setattr(conds, a, v.to(device='cuda', dtype=target_dtype))
-                                        else:
-                                            setattr(conds, a, v.to('cuda'))
-                                    except Exception:
-                                        try:
-                                            setattr(conds, a, v.to('cuda'))
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                pass
-            except Exception:
-                log.exception("Failed to coerce conds float fields for T3")
-            try:
-                summary = _dump_conds_summary(conds, max_items=200)
-                log.info("conds summary: %s", summary)
-            except Exception:
-                log.exception("Failed to dump conds summary after coercion")
-        except Exception:
-            log.exception("Failed to dump conds summary")
-            # Final pass: ensure all torch tensors in conds match the T3 param dtype
-            try:
-                if device == 'cuda' and conds is not None and hasattr(model, 't3'):
-                    try:
-                        target_param = next(model.t3.parameters())
-                        target_dtype = getattr(target_param, 'dtype', None)
-                    except Exception:
-                        target_dtype = None
-                    try:
-                        _cast_tensors_in_obj(model.conds, device='cuda', dtype=target_dtype)
-                    except Exception:
-                        pass
-                    try:
-                        _deep_cast_attrs(model.conds, device='cuda', dtype=target_dtype)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        # Debug: log T3 param dtype and conds tensor dtypes before generation
-        try:
-            try:
-                if hasattr(model, 't3'):
-                    t3_param = next(model.t3.parameters())
-                    log.info('T3 param dtype=%s', getattr(t3_param, 'dtype', None))
-            except Exception:
-                pass
-            try:
-                conds_dbg = getattr(model, 'conds', None)
-                if conds_dbg is not None:
-                    for a in [x for x in dir(conds_dbg) if not x.startswith('_')][:200]:
-                        try:
-                            v = getattr(conds_dbg, a)
-                            if hasattr(v, 'dtype') and hasattr(v, 'device'):
-                                log.info('COND DBG: %s dtype=%s device=%s type=%s', a, getattr(v, 'dtype', None), getattr(v, 'device', None), type(v).__name__)
-                            elif 'numpy' in str(type(v)):
-                                log.info('COND DBG: %s numpy dtype=%s shape=%s', a, getattr(v, 'dtype', None), getattr(v, 'shape', None))
-                            else:
-                                log.info('COND DBG: %s type=%s', a, type(v).__name__)
-                        except Exception:
-                            log.exception('COND DBG FAIL: %s', a)
-            except Exception:
-                log.exception('Failed to dump conds debug info')
-        except Exception:
-            pass
-
-        # If conds exposes a `to` method, use it to coerce nested cond tensors
-        try:
-            if device == 'cuda' and getattr(model, 'conds', None) is not None and hasattr(model.conds, 'to'):
-                targ = None
-                if hasattr(model, 't3'):
-                    try:
-                        targ = next(model.t3.parameters()).dtype
-                    except Exception:
-                        targ = None
-                if targ is not None:
-                    try:
-                        res = model.conds.to('cuda', dtype=targ)
-                        try:
-                            model.conds = res
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            model.conds.to('cuda', dtype=targ)
-                        except Exception:
-                            pass
-                else:
-                    try:
-                        res = model.conds.to('cuda')
-                        try:
-                            model.conds = res
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            model.conds.to('cuda')
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+                _move_conds_to_device(model.conds, torch.device("cuda"))
+                # Verify: spot-check a key tensor
+                t3cond = getattr(model.conds, 't3_cond', None) or getattr(model.conds, 'cond', None)
+                if t3cond:
+                    tok = getattr(t3cond, 'cond_prompt_speech_tokens', None)
+                    if isinstance(tok, torch.Tensor):
+                        log.info("[chatterbox] VERIFY cond_prompt_speech_tokens device=%s dtype=%s", tok.device, tok.dtype)
+            except Exception as e:
+                log.warning("[chatterbox] conds device verify failed: %s", str(e))
 
         # Use standard generate for full audio
         wav = safe_generate(

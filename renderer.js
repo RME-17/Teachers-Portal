@@ -18710,10 +18710,19 @@ function setAssistantBubbleText(bubble, text) {
         }
         await voiceScheduleChain.catch(() => {});
         voiceAllChunksQueued = true;
-			/* Wait for all emitted chunks to arrive, queue, and finish playback */
+        /* Wait for all emitted chunks to arrive, queue, and finish playback.
+         * Watchdog: force-complete after 30s to prevent permanent silence. */
+        const WATCHDOG_MS = 30000;
+        const watchdogStart = Date.now();
         for (;;) {
-				if (st.bargeinAborted) break;
-				if (voiceAllChunksQueued && !(voiceChunksPending > 0 || voicePlaying || voicePlayQueue.length > 0)) break;
+          if (st.bargeinAborted) break;
+          if (voiceAllChunksQueued && !(voiceChunksPending > 0 || voicePlaying || voicePlayQueue.length > 0)) break;
+          if (Date.now() - watchdogStart > WATCHDOG_MS) {
+            console.warn("[voice] playback watchdog fired — forcing turn complete (voicePlaying=" + voicePlaying + " voiceChunksPending=" + voiceChunksPending + " queueDepth=" + voicePlayQueue.length + ")");
+            stopVoicePlayback();
+            resetVoicePlaybackSchedule();
+            break;
+          }
           await new Promise(r => setTimeout(r, 100));
         }
         unsubTts();
@@ -18924,6 +18933,10 @@ function setAssistantBubbleText(bubble, text) {
     let voiceAnalyser = null;
     /** @type {number | null} */
     let voiceGlowAnimId = null;
+    /** Continuous audio timeline — next chunk scheduled exactly where previous chunk ends */
+    let _nextChunkStartTime = 0;
+    /** @type {GainNode | null} */
+    let _voiceOutputGain = null;
 
     function getVoiceAudioContext() {
       const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -18940,16 +18953,37 @@ function setAssistantBubbleText(bubble, text) {
       return voiceAudioCtx;
     }
 
-    function processVoicePlayQueue() {
+    async function processVoicePlayQueue() {
       if (voicePlaying) return;
       if (voicePlayQueue.length === 0) return;
       voicePlaying = true;
-      // Reset barge-in grace period on each new chunk onset so the
-      // transient attack doesn't self-trigger barge-in via AEC bleed.
-      st.bargeinGraceRemaining = BARGEIN_GRACE_MS;
-      const { source, ctx } = voicePlayQueue.shift();
+      const ctx = voiceAudioCtx;
+      if (!ctx || ctx.state === "closed") {
+        voicePlaying = false;
+        return;
+      }
+      // Ensure context is running (autoplay policy may suspend it)
+      if (ctx.state === "suspended") {
+        try { await ctx.resume(); } catch {}
+      }
+
+      // Build output chain once: source -> gain -> destination
+      if (!_voiceOutputGain || _voiceOutputGain.context !== ctx) {
+        try { _voiceOutputGain?.disconnect(); } catch {}
+        _voiceOutputGain = ctx.createGain();
+        _voiceOutputGain.gain.value = 1.0;
+        _voiceOutputGain.connect(ctx.destination);
+      }
+
+      const { source } = voicePlayQueue.shift();
+
+      // Continuous clock: schedule where the last chunk ends, or now if first chunk
+      const now = ctx.currentTime;
+      if (_nextChunkStartTime < now) _nextChunkStartTime = now;
+      const startAt = _nextChunkStartTime + 0.002; // 2ms pad to avoid clock drift
+      source.connect(_voiceOutputGain);
+
       try {
-        const startAt = ctx.currentTime + 0.005;
         source.start(startAt);
       } catch (e) {
         console.warn("[voice] source.start failed:", e instanceof Error ? e.message : String(e));
@@ -18957,7 +18991,16 @@ function setAssistantBubbleText(bubble, text) {
         processVoicePlayQueue();
         return;
       }
+
+      // Advance the clock by this buffer's exact duration
+      _nextChunkStartTime = startAt + (source.buffer ? source.buffer.duration : 0);
       activeVoiceSources.add(source);
+
+      // Reset barge-in grace only on first chunk of a fresh turn
+      if (st.bargeinGraceRemaining <= 0 && !st.bargeinAborted) {
+        st.bargeinGraceRemaining = BARGEIN_GRACE_MS;
+      }
+
       source.onended = () => {
         activeVoiceSources.delete(source);
         voicePlaying = false;
@@ -18970,6 +19013,7 @@ function setAssistantBubbleText(bubble, text) {
       voiceScheduleChain = Promise.resolve();
       voiceChunksPending = 0;
       voiceAllChunksQueued = false;
+      _nextChunkStartTime = 0;
     }
 
     function startVoiceGlow() {
@@ -19043,6 +19087,7 @@ function setAssistantBubbleText(bubble, text) {
       voicePlayQueue.length = 0;
       voicePlaying = false;
       voiceChunksPending = 0;
+      _nextChunkStartTime = 0;
     }
 
     window.__rmeVoiceStopPlayback = stopVoicePlayback;
@@ -19090,10 +19135,7 @@ function setAssistantBubbleText(bubble, text) {
           const source = ctx.createBufferSource();
           source.buffer = buffer;
           source.playbackRate.value = 0.95;
-          const voiceGain = ctx.createGain();
-          voiceGain.gain.value = 1.0;
-          source.connect(voiceGain);
-          voiceGain.connect(ctx.destination);
+          // Output chain handled by processVoicePlayQueue (shared gain → destination)
           voiceChunksPending++;
           voicePlayQueue.push({ source, ctx });
           processVoicePlayQueue();

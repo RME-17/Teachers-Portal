@@ -3033,6 +3033,8 @@ if (!gotTheLock) {
      });
      
      ipcMain.handle("voice:start-wake-word-listening", async () => {
+       voiceMemory.newSession();
+       console.log(`[memory] New session started: ${voiceMemory.getCurrentSessionId()}`);
        const voiceAgent = getVoiceAgent();
        return voiceAgent.startWakeWordListening();
      });
@@ -3386,6 +3388,17 @@ ipcMain.handle('dream:reset', async () => {
         log.info("memory", { injectedPageRefs: fallbackRefs.length, cid });
       }
 
+      /* --- Voice memory digest: session summaries + durable facts (auto-injected every turn within token budget) --- */
+      const digestResult = await voiceMemory.getMemoryDigest({
+        userEmail: ALLOWED_ADMIN_EMAIL,
+        maxTokens: 500,
+        userName: detectedSpeaker,
+      });
+      if (digestResult.ok && digestResult.data) {
+        contextBlocks.push(digestResult.data);
+        log.info("memory", { autoContextDigest: digestResult.data.length, cid });
+      }
+
       if (contextBlocks.length > 0) {
         systemText = contextBlocks.join("\n\n") + "\n\n" + systemText;
       }
@@ -3433,8 +3446,8 @@ ipcMain.handle('dream:reset', async () => {
         },
         {
           name: "memory_recall",
-          description: "Search stored facts and page references by keyword. Use this when the pre-injected data doesn't contain what you need. INPUT: search (string, the word or phrase to search for).",
-          input_schema: { type: "object", properties: { search: { type: "string", description: "Word or phrase to search for in stored facts and page refs" } }, required: ["search"] },
+          description: "Search stored facts, page references, and past conversation memories by keyword OR time range. Use this when the pre-injected data doesn't contain what you need. INPUT: search (string, optional keyword) OR timeRange (string: 'today', '7d', '30d', optional). RETURNS: matching facts, pageRefs, and relevant past conversation snippets.",
+          input_schema: { type: "object", properties: { search: { type: "string", description: "Word or phrase to search for" }, timeRange: { type: "string", description: "Time window: today, 7d, or 30d" } } },
         },
       );
 
@@ -3692,12 +3705,36 @@ ipcMain.handle('dream:reset', async () => {
         }
         if (tName === "memory_recall") {
           const search = typeof tInput.search === "string" ? tInput.search.trim() : "";
-          if (!search) return { ok: false, error: { code: "BAD_INPUT", message: "search string required" } };
-          const [factResults, pageRefResults] = await Promise.all([
+          const timeRange = typeof tInput.timeRange === "string" ? tInput.timeRange.trim() : "";
+          if (!search && !timeRange) return { ok: false, error: { code: "BAD_INPUT", message: "search or timeRange required" } };
+          if (search && timeRange) {
+            // Both semantic + time-filtered search
+            const result = await voiceMemory.recallConversations({
+              userEmail: ALLOWED_ADMIN_EMAIL,
+              query: search,
+              timeRange,
+              k: 5,
+            });
+            return { ok: result.ok, data: result.ok ? result.data : null, error: result.ok ? null : result.error };
+          }
+          if (timeRange) {
+            // Time-range summary only
+            const result = await voiceMemory.recallConversations({
+              userEmail: ALLOWED_ADMIN_EMAIL,
+              timeRange,
+            });
+            return { ok: result.ok, data: result.ok ? result.data : null, error: result.ok ? null : result.error };
+          }
+          const [factResults, pageRefResults, semanticResults] = await Promise.all([
             voiceMemory.searchFacts({ userEmail: ALLOWED_ADMIN_EMAIL, search, limit: 5 }),
             pageMemory.searchPageRefs({ userEmail: ALLOWED_ADMIN_EMAIL, search, limit: 5 }),
+            voiceMemory.recallSemantic({ userEmail: ALLOWED_ADMIN_EMAIL, queryText: search, k: 3 }),
           ]);
-          return { ok: true, data: { facts: factResults.ok ? factResults.data : [], pageRefs: pageRefResults.ok ? pageRefResults.data : [] } };
+          return { ok: true, data: {
+            facts: factResults.ok ? factResults.data : [],
+            pageRefs: pageRefResults.ok ? pageRefResults.data : [],
+            memories: semanticResults.ok ? semanticResults.data : [],
+          }};
         }
 
         /* --- Page reference tools (stored in Supabase voice_page_refs table) --- */
@@ -3834,6 +3871,67 @@ ipcMain.handle('dream:reset', async () => {
         /* Phase 2 stub: fact extraction runs after turn, doesn't block */
         extractFacts({ userMessage: lastUserMsg, assistantReply: turnResult.text, userEmail: ALLOWED_ADMIN_EMAIL, cid }).catch(e => console.warn("[planner] embed hook failed:", e instanceof Error ? e.message : String(e)));
         distillation.maybeDistill({ userEmail: ALLOWED_ADMIN_EMAIL, interval: 50 }).catch(e => console.warn("[planner] embed hook failed:", e instanceof Error ? e.message : String(e)));
+      }
+
+      /* --- Session tracking: count turns, auto-summarise every 10 turns --- */
+      const sessionId = voiceMemory.getCurrentSessionId();
+      const turnCount = voiceMemory.bumpTurnCount();
+      if (turnCount > 0 && turnCount % 10 === 0) {
+        // Fire-and-forget background summary generation
+        void (async () => {
+          try {
+            const convResult = await voiceMemory.getRecentConversations({
+              userEmail: ALLOWED_ADMIN_EMAIL,
+              userName: detectedSpeaker,
+              limit: 20,
+            });
+            if (convResult.ok && Array.isArray(convResult.data) && convResult.data.length >= 6) {
+              const convText = convResult.data
+                .slice(0, 20)
+                .reverse()
+                .map(r => `${r.turn_role === 'assistant' ? 'Retron' : 'User'}: ${(r.content || '').slice(0, 300)}`)
+                .join('\n');
+              // Generate concise summary via Claude (fire-and-forget, doesn't block voice)
+              const summaryPrompt = `Summarise the last 10 conversation turns between RME founders and their voice assistant Retron. Keep under 150 words. Focus on: topics discussed, decisions made, tasks requested, facts shared. Output the summary only — no preamble.\n\n${convText}`;
+              try {
+                const anthropicKey = process.env.ANTHROPIC_API_KEY;
+                if (anthropicKey) {
+                  const res = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': anthropicKey,
+                      'anthropic-version': '2023-06-01',
+                    },
+                    body: JSON.stringify({
+                      model: 'claude-haiku-4-5-20251001',
+                      max_tokens: 200,
+                      system: 'You are a summariser. Output only the summary, no preamble.',
+                      messages: [{ role: 'user', content: summaryPrompt }],
+                    }),
+                  });
+                  if (res.ok) {
+                    const body = await res.json();
+                    const summary = ((body.content && body.content[0] && body.content[0].text) || '').trim().slice(0, 800);
+                    if (summary) {
+                      await voiceMemory.storeSessionSummary({
+                        userEmail: ALLOWED_ADMIN_EMAIL,
+                        sessionId,
+                        summary,
+                        userName: detectedSpeaker,
+                      });
+                      console.log(`[memory] Auto-summary stored for session ${sessionId} (turn ${turnCount}): ${summary.slice(0, 80)}...`);
+                    }
+                  }
+                }
+              } catch (summaryErr) {
+                console.warn('[memory] Summary generation failed:', summaryErr instanceof Error ? summaryErr.message : String(summaryErr));
+              }
+            }
+          } catch (e) {
+            // Non-fatal — fails silently
+          }
+        })();
       }
 
       const va = getVoiceAgent();
