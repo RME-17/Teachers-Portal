@@ -5,7 +5,6 @@ This is an Electron desktop app for Recruit My English, a 2-person commission-on
 ## Project structure
 
 - AGENTS.md — single source of truth for project map, rules, and conventions
-- .cursor/rules/codebase-map.mdc — pinned Cursor rule (symbol → file; alwaysApply)
 - main.js — Electron main process, IPC handlers, sidecar lifecycle
 - preload.js — bridge between main and renderer
 - renderer.js — UI logic, all dashboard cards
@@ -42,10 +41,6 @@ This is an Electron desktop app for Recruit My English, a 2-person commission-on
 - Voice IPC handlers live in main.js. Handles: voice:transcribe, voice:ask-claude, voice:speak, voice:status, voice:warm-tts, voice:assistant-turn, voice:system-prompt, voice:set-voice, voice:get-voice, voice:vad-port, voice:start-wake-word-listening, voice:stop-wake-word-listening, voice:detect-wake-word, voice:detect-stop-command. Events (not handles): voice:tts-chunk, voice:claude-delta. Canonical warm: voice:warm-tts only.
 - Renderer adds dashboard cards via IIFEs named rme<Feature>DashboardCard before the toggleTheme function. New cards follow this pattern.
 - After every code change, append a Code change log entry in the project's mirror notes (the user will tell you where).
-
-## Skills
-
-- Load `.cursor/skills/rme-teachers-portal/SKILL.md` for Notion lookup accuracy, voice-agent stability, and portal conventions.
 
 ## Voice agent rules (RME personality)
 
@@ -86,20 +81,20 @@ This is an Electron desktop app for Recruit My English, a 2-person commission-on
 - Never invent the shape of an existing module. Before editing `lib/tts/index.js` (or any module), read its current `module.exports` and match it exactly. The current `lib/tts/index.js` exports `synthesize`, `synthesizeUtterance`, `warmTts`, `ttsReady`, `getTtsStatus`, `shutdown` — do not rewrite this surface as a class or rename methods.
 - **Never use `process.env` in renderer.js or any renderer-loaded file.** The renderer has `contextIsolation: true`, `nodeIntegration: false` — `process` is not available and any reference throws `ReferenceError`, crashing the renderer and preventing auth/dashboard code from loading. Use hardcoded defaults, or expose config via a preload bridge IPC handler.
 
-## Line counts (2026-05-29)
+## Line counts (2026-06-01)
 
 | File | Lines |
 |------|------:|
-| `main.js` | 3410 |
-| `preload.js` | 1455 |
-| `index.html` | 13474 |
-| `renderer.js` | 32920 |
-| `renderer-calendar.js` | 4807 |
-| `lib/voice-agent.js` | 1933 |
-| `lib/voice-agent/stt-router.js` | 105 |
-| `lib/voice-agent/parakeet-server.js` | 228 |
-| `lib/voice-agent/whisper-server.js` | 355 |
-| `lib/voice-agent/warm.js` | 61 |
+| `main.js` | 4129 |
+| `preload.js` | 1538 |
+| `index.html` | 14065 |
+| `renderer.js` | 36045 |
+| `renderer-calendar.js` | 5126 |
+| `lib/voice-agent.js` | 2149 |
+| `lib/voice-agent/stt-router.js` | 135 |
+| `lib/voice-agent/parakeet-server.js` | 254 |
+| `lib/voice-agent/whisper-server.js` | 392 |
+| `lib/voice-agent/warm.js` | 67 |
 
 ## Voice IPC (canonical names, main.js)
 
