@@ -310,7 +310,7 @@ executor = ThreadPoolExecutor(max_workers=2)
 _COND_CACHE = {}
 _COND_DEBUG_DONE = False
 DEFAULT_VOICE_REF = args.voice_ref or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "voices", "jennifer.wav"
+    os.path.dirname(os.path.abspath(__file__)), "voices", "ryan.wav"
 )
 
 # --- Warmup synth to avoid cold-start on first real request ---
@@ -801,7 +801,7 @@ async def get_metrics():
 
 class TTSRequest(BaseModel):
     input: str
-    voice: str = "jennifer-english"
+    voice: str = "ryan-english"
     model: str = "tts-1"
     exaggeration: float = 0.35
     cfg_weight: float = 0.55
@@ -809,6 +809,7 @@ class TTSRequest(BaseModel):
 
 VOICE_MAP = {
     "jennifer-english": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "jennifer.wav"),
+    "ryan-english": os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "ryan.wav"),
 }
 
 @app.post("/v1/audio/speech")
