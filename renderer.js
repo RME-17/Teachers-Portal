@@ -19412,7 +19412,7 @@ function setAppTheme(theme) {
     panel.id = "rmeVoiceSettingsPanel";
     panel.innerHTML = [
       '<h4>Voice Settings</h4>',
-      '<button class="rme-vs-opt rme-vs-active" data-voice="jennifer-english">Jennifer English (American)</button>',
+      '<button class="rme-vs-opt rme-vs-active" data-voice="ryan-english">Ryan English (American)</button>',
     ].join("");
     wrapper.appendChild(panel);
 

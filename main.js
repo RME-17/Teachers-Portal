@@ -2150,10 +2150,10 @@ if (!gotTheLock) {
       svc.setUserEmail(ALLOWED_ADMIN_EMAIL);
     })();
 
-    /* Load persisted voice preference — always force Jennifer English as the only voice */
+    /* Load persisted voice preference — always force Ryan English as the only voice */
     try {
       const { setVoice } = require("./lib/tts/index");
-      if (typeof setVoice === "function") setVoice("jennifer-english");
+      if (typeof setVoice === "function") setVoice("ryan-english");
     } catch (e) {
       /* ignore */
     }
@@ -3970,20 +3970,20 @@ ipcMain.handle('dream:reset', async () => {
       return turnResult;
     });
 
-    /* --- Voice config IPC (preset selection, no restart needed) — Jennifer English is the only voice --- */
+    /* --- Voice config IPC (preset selection, no restart needed) — Ryan English is the only voice --- */
     ipcMain.handle("voice:set-voice", async (_evt, payload) => {
       const { setVoice } = require("./lib/tts/index");
       if (typeof setVoice !== "function") return { ok: false, error: "TTS not initialized" };
-      setVoice("jennifer-english");
+      setVoice("ryan-english");
       const voiceConfigPath = path.join(app.getPath("userData"), "voice-preference.json");
       try {
-        fs.writeFileSync(voiceConfigPath, JSON.stringify({ voice: "jennifer-english" }), "utf8");
+        fs.writeFileSync(voiceConfigPath, JSON.stringify({ voice: "ryan-english" }), "utf8");
       } catch {}
-      console.log(`[voice] voice set to "jennifer-english"`);
+      console.log(`[voice] voice set to "ryan-english"`);
       return { ok: true };
     });
     ipcMain.handle("voice:get-voice", () => {
-      return { ok: true, voice: "jennifer-english" };
+      return { ok: true, voice: "ryan-english" };
     });
 
     /* --- Memory IPC handlers (admin-only) --- */
