@@ -20,6 +20,10 @@ from silero_vad import load_silero_vad
 
 logging.basicConfig(level=logging.INFO, format="[vad-server] %(message)s")
 log = logging.getLogger(__name__)
+# Quiet websockets per-connection INFO logs. The /health poll returns HTTP 200
+# instead of upgrading, so websockets logs it as "connection rejected (200 OK)".
+# Harmless noise; our own [vad-server] diagnostics use the __main__ logger.
+logging.getLogger("websockets.server").setLevel(logging.WARNING)
 
 SAMPLING_RATE = 16000
 FRAME_SAMPLES = 512
