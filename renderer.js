@@ -17641,7 +17641,7 @@ setupAccountSecurityPanels();
   let _vadFramesSent_ts = 0;
   let _vadMicDiag_ts = 0;
   let _bargeinDiag_ts = 0;
-  const VAD_SPEECH_THRESHOLD = 0.5;
+  const VAD_SPEECH_THRESHOLD = 0.35; // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
   const VAD_MIN_SILENCE_MS = 1500; // longer pause before finalizing turn (was 700, too short)
   const VAD_SPEECH_PAD_MS = 400; // trailing audio pad after speech ends (was 300)
