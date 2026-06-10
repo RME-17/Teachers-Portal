@@ -1,6 +1,6 @@
 {
   "name": "recruit-my-english",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Recruit My English — simple desktop app",
   "main": "main.js",
   "scripts": {
@@ -129,6 +129,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "differentialPackage": true
-    }
+    },
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ]
   }
 }
