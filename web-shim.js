@@ -37,6 +37,43 @@
   var ADMIN_CREDS_KEY = "rme.web.adminCreds";
   function resolve(v) { return Promise.resolve(v); }
 
+  // Reads the persisted Supabase session access token from localStorage
+  // (supabase-js v2 stores it under "sb-<ref>-auth-token").
+  function rmeGetAccessToken() {
+    try {
+      for (var i = 0; i < window.localStorage.length; i++) {
+        var k = window.localStorage.key(i);
+        if (!k || k.indexOf("sb-") !== 0 || k.indexOf("-auth-token") === -1) continue;
+        var raw = window.localStorage.getItem(k);
+        if (!raw) continue;
+        var obj = JSON.parse(raw);
+        var tok = obj && (obj.access_token || (obj.currentSession && obj.currentSession.access_token));
+        if (tok) return tok;
+      }
+    } catch (e) {}
+    return "";
+  }
+
+  // Pay slips require the secret NOTION_TOKEN, which must NEVER ship to a browser.
+  // Instead we call the Supabase Edge Function "notion-payslips", which holds the
+  // token server-side and returns the SAME shape as the desktop IPC handler.
+  function rmeQueryPayslips(payload) {
+    var token = rmeGetAccessToken();
+    return fetch(SUPABASE_URL + "/functions/v1/notion-payslips", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (token || SUPABASE_ANON_KEY),
+        "apikey": SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(payload || {}),
+    })
+      .then(function (r) { return r.json(); })
+      .catch(function (e) {
+        return { ok: false, message: String((e && e.message) || e), columns: [], rows: [], pageIds: [], noEmailColumn: false };
+      });
+  }
+
   // --- Mocked ipcRenderer ----------------------------------------------------
   var ipcRenderer = {
     invoke: function (channel, payload) {
@@ -44,6 +81,8 @@
         switch (channel) {
           case "config:get-supabase":
             return resolve({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+          case "notion:query-teacher-payslips":
+            return rmeQueryPayslips(payload);
           case "admin-creds:save":
             try { window.localStorage.setItem(ADMIN_CREDS_KEY, JSON.stringify(payload || {})); } catch (e) {}
             return resolve({ ok: true });
