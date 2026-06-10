@@ -25,6 +25,10 @@ if (process.platform === "win32") {
   app.commandLine.appendSwitch("disable-features", "FluentScrollbars");
 }
 
+// Chromium HTTP disk cache throws repeated "writing the file to cache" ENOTDIR
+// noise on some Windows profiles; the app does not rely on it, so disable it.
+app.commandLine.appendSwitch("disable-http-cache");
+
 /** Windows 11 Efficiency Mode (EcoQoS) — green leaf in Task Manager when backgrounded. */
 let winEfficiencyMode = null;
 if (process.platform === "win32") {
