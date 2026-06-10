@@ -47,6 +47,14 @@ const RENDERER_FLUSH_FLOATING_DRAFTS_JS =
 const RENDERER_FLUSH_PLANNER_JS =
   "(async function(){try{if(typeof window.rmePlannerFlushAll==='function')await window.rmePlannerFlushAll();}catch(e){console.error('[planner flush]',e);}})();";
 
+// Resolve bundled Python voice servers (STT/VAD/TTS).
+// Packaged builds ship tools/ via electron-builder extraResources to resources/tools.
+if (!process.env.RME_TOOLS_ROOT) {
+  process.env.RME_TOOLS_ROOT = app.isPackaged
+    ? path.join(process.resourcesPath, "tools")
+    : path.join(__dirname, "tools");
+}
+
 function loadDotenv() {
   const dotenv = require("dotenv");
   /** Later paths win. Exe dir first, then userData, so AppData edits override install folder. */
@@ -2068,7 +2076,7 @@ if (!gotTheLock) {
   function spawnVadSidecar() {
     try {
       _vadPort = Number(process.env.RME_VAD_PORT || "8125") || 8125;
-      const scriptPath = path.join(__dirname, "tools", "vad", "vad-server.py");
+      const scriptPath = path.join(process.env.RME_TOOLS_ROOT || path.join(__dirname, "tools"), "vad", "vad-server.py");
       if (!fs.existsSync(scriptPath)) {
         console.warn("[vad] Server script not found at", scriptPath);
         return;

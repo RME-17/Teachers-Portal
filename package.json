@@ -1,6 +1,6 @@
 {
   "name": "recruit-my-english",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Recruit My English — simple desktop app",
   "main": "main.js",
   "scripts": {
@@ -104,6 +104,22 @@
       {
         "from": "supabase.public.env",
         "to": "supabase.public.env"
+      },
+      {
+        "from": "tools/stt",
+        "to": "tools/stt"
+      },
+      {
+        "from": "tools/vad",
+        "to": "tools/vad"
+      },
+      {
+        "from": "tools/tts",
+        "to": "tools/tts"
+      },
+      {
+        "from": "scripts/setup-voice-gpu.ps1",
+        "to": "setup-voice-gpu.ps1"
       }
     ],
     "win": {
