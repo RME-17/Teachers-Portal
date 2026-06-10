@@ -1006,18 +1006,13 @@ async function queryTeacherPaySlips(payload) {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-const ALLOWED_ORIGINS = new Set([
-  "https://ayaaz777.github.io",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-]);
-function corsHeaders(origin) {
-  const allow = origin && ALLOWED_ORIGINS.has(origin) ? origin : "https://ayaaz777.github.io";
+function corsHeaders(_origin) {
+  // Data is protected by the Supabase JWT check below, not by Origin.
+  // Allow any origin so the static site works regardless of its GitHub Pages URL.
   return {
-    "Access-Control-Allow-Origin": allow,
+    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Vary": "Origin",
   };
 }
 async function getVerifiedEmail(req) {
