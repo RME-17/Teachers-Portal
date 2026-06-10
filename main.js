@@ -55,6 +55,21 @@ if (!process.env.RME_TOOLS_ROOT) {
     : path.join(__dirname, "tools");
 }
 
+// Auto-detect the GPU voice Python environments created by setup-voice-gpu.ps1
+// (under the app userData dir) so voice works even if no .env was written.
+try {
+  const _voiceBases = [];
+  try { _voiceBases.push(app.getPath("userData")); } catch (e) {}
+  if (process.env.APPDATA) { _voiceBases.push(path.join(process.env.APPDATA, "Recruit My English")); }
+  for (const _b of _voiceBases) {
+    const _stt = path.join(_b, "voice-venv", "Scripts", "python.exe");
+    const _tts = path.join(_b, "tts-venv", "Scripts", "python.exe");
+    if (!process.env.RME_PARAKEET_PYTHON && fs.existsSync(_stt)) process.env.RME_PARAKEET_PYTHON = _stt;
+    if (!process.env.RME_PYTHON_EXE && fs.existsSync(_tts)) process.env.RME_PYTHON_EXE = _tts;
+  }
+  if (!process.env.RME_PARAKEET_DEVICE) process.env.RME_PARAKEET_DEVICE = "cuda";
+} catch (e) { /* ignore */ }
+
 function loadDotenv() {
   const dotenv = require("dotenv");
   /** Later paths win. Exe dir first, then userData, so AppData edits override install folder. */
