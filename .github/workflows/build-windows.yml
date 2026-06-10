@@ -2,6 +2,9 @@ name: Build Windows Desktop
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "winbuild-*"
 
 permissions:
   contents: write
