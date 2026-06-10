@@ -35,6 +35,10 @@
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZXd1bHBpdnBxa2JzdmhhYWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NDkzOTksImV4cCI6MjA5MzEyNTM5OX0.XacFfKcniMntC8cCYpFTPN5-j5GAgM2ZijFQdgavA4U";
 
   var ADMIN_CREDS_KEY = "rme.web.adminCreds";
+  // Admin role for the browser build. The app already hard-codes this same
+  // address in renderer.js (ADMIN_EMAILS), so this is not a new secret. Real
+  // admin-data protection must live in Supabase RLS, not this UI role check.
+  var ADMIN_EMAIL = "inforecruitmyenglish@gmail.com";
   function resolve(v) { return Promise.resolve(v); }
 
   // Reads the persisted Supabase session access token from localStorage
@@ -81,6 +85,10 @@
         switch (channel) {
           case "config:get-supabase":
             return resolve({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+          case "auth:allowed-admin-email":
+            // Lets supabaseSessionUserIsAdmin() resolve admin mode in-browser,
+            // unlocking the admin dock (incl. the AI / Voice agent section).
+            return resolve({ email: ADMIN_EMAIL });
           case "notion:query-teacher-payslips":
             return rmeQueryPayslips(payload);
           case "admin-creds:save":
