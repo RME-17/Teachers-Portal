@@ -43,7 +43,7 @@ function Ensure-CudaTorch($vpy) {
 $SttDir = Join-Path $UserData "voice-venv"
 $SttPy  = New-Venv $SttDir
 Write-Host "Removing any Chatterbox leftovers from the STT env (ok if none) ..." -ForegroundColor DarkGray
-& $SttPy -m pip uninstall -y chatterbox-tts s3tokenizer 2>&1 | Out-Null
+try { & $SttPy -m pip uninstall -y chatterbox-tts s3tokenizer *>$null } catch {}
 Write-Host "Ensuring Parakeet (NeMo) packages in STT env ..." -ForegroundColor Cyan
 Pip $SttPy @("install","nemo_toolkit[asr]>=2.0.0","aiohttp>=3.9","soundfile>=0.12","pyarrow==21.0.0")
 Ensure-CudaTorch $SttPy
