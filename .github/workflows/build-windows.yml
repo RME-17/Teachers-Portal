@@ -1,0 +1,60 @@
+name: Build Windows Desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Write build .env (Supabase public client values)
+        shell: bash
+        run: |
+          cat > .env <<EOF
+          SUPABASE_URL=https://rlewulpivpqkbsvhaafp.supabase.co
+          SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZXd1bHBpdnBxa2JzdmhhYWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NDkzOTksImV4cCI6MjA5MzEyNTM5OX0.XacFfKcniMntC8cCYpFTPN5-j5GAgM2ZijFQdgavA4U
+          EOF
+          echo "wrote .env"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows installer
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List dist
+        shell: bash
+        run: ls -la dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="desktop-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" dist/*.exe \
+            --title "RME Desktop (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Windows installer built from commit ${GITHUB_SHA}." \
+          || gh release upload "$tag" dist/*.exe --clobber
+          echo "RELEASE_TAG=$tag"
