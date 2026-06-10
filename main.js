@@ -4120,10 +4120,24 @@ ipcMain.handle('dream:reset', async () => {
     createWindow();
     initAutoUpdate(() => mainWindow);
     // Start Discord bot if configured
+    const __fmtDiscordErr = (e) => {
+      if (!e) return String(e);
+      const code = e.code || (e.rawError && e.rawError.code);
+      let msg = e.stack || e.message;
+      if (!msg) { try { msg = JSON.stringify(e); } catch (x) { msg = String(e); } }
+      const text = String((e.message || '') + ' ' + (code || '')).toLowerCase();
+      let hint = '';
+      if (text.includes('disallowed') || text.includes('intent')) {
+        hint = ' | HINT: In the Discord Developer Portal (your app -> Bot), enable BOTH "Message Content Intent" and "Server Members Intent", then restart.';
+      } else if (text.includes('token') || code === 'TokenInvalid') {
+        hint = ' | HINT: DISCORD_BOT_TOKEN is missing/invalid. Reset it in the Developer Portal (Bot -> Reset Token) and update your .env.';
+      }
+      return (code ? '[' + code + '] ' : '') + msg + hint;
+    };
     try {
-      discordBot.start().catch((e) => console.warn('[discord] start failed', e));
+      discordBot.start().catch((e) => console.warn('[discord] start failed:', __fmtDiscordErr(e)));
     } catch (e) {
-      console.warn('[discord] require/start failed', e);
+      console.warn('[discord] require/start failed:', __fmtDiscordErr(e));
     }
 
     app.on("activate", () => {
