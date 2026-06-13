@@ -17642,6 +17642,7 @@ setupAccountSecurityPanels();
   let _vadMicDiag_ts = 0;
   const RME_VOICE_MIC_KEY = "rme-voice-mic-v1";
   let _voiceMicGain = 1;
+  let _vadAutoGain = 1;
   function loadVoiceMicPrefs() {
     try {
       const raw = window.localStorage.getItem(RME_VOICE_MIC_KEY);
@@ -18370,8 +18371,26 @@ function setAssistantBubbleText(bubble, text) {
             _vadDiagSilentOnce = false;
             let input = ev.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
-            if (_voiceMicGain && _voiceMicGain !== 1) {
-              const _g = _voiceMicGain;
+            // Adaptive auto-gain: quiet mics (raw peak ~0.01) never trip Silero VAD,
+            // so wake detection never fires. Measure raw peak, drive it toward a target,
+            // smoothed (fast attack / slow release), clamped, with the user gain as floor.
+            // Silero is model-based, so amplified room noise still reads as non-speech.
+            let _rawPeak = 0;
+            for (let i = 0; i < input.length; i++) {
+              const a = input[i] < 0 ? -input[i] : input[i];
+              if (a > _rawPeak) _rawPeak = a;
+            }
+            const _AG_TARGET_PEAK = 0.35;
+            const _AG_MAX_GAIN = 60;
+            const _AG_NOISE_FLOOR = 0.0015;
+            let _desiredGain = _voiceMicGain || 1;
+            if (_rawPeak > _AG_NOISE_FLOOR) {
+              _desiredGain = Math.max(_voiceMicGain || 1, Math.min(_AG_MAX_GAIN, _AG_TARGET_PEAK / _rawPeak));
+            }
+            _vadAutoGain += (_desiredGain - _vadAutoGain) * (_desiredGain > _vadAutoGain ? 0.5 : 0.05);
+            if (!isFinite(_vadAutoGain) || _vadAutoGain < 1) _vadAutoGain = 1;
+            if (_vadAutoGain !== 1) {
+              const _g = _vadAutoGain;
               const _boosted = new Float32Array(input.length);
               for (let i = 0; i < input.length; i++) {
                 const v = input[i] * _g;
@@ -18388,7 +18407,7 @@ function setAssistantBubbleText(bubble, text) {
               console.log("[voice] VAD mic buffer: length=" + input.length + " sampleRate=" + st.vadAudioCtx.sampleRate + " rms=" + rms.toFixed(6));
             } else if (Date.now() - _vadMicDiag_ts > 3000) {
               _vadMicDiag_ts = Date.now();
-              console.log("[voice] VAD mic buffer: rms=" + rms.toFixed(6) + " phase=" + st.voicePhase);
+              console.log("[voice] VAD mic buffer: rms=" + rms.toFixed(6) + " rawPeak=" + _rawPeak.toFixed(4) + " autoGain=" + _vadAutoGain.toFixed(1) + " phase=" + st.voicePhase);
             }
             const int16 = new Int16Array(input.length);
             for (let i = 0; i < input.length; i++) {
