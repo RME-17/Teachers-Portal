@@ -18421,9 +18421,14 @@ function setAssistantBubbleText(bubble, text) {
               } else if (!st.busy) {
                 handleVadDecision();
               }
-            } else if (st.voicePhase === "awaiting_wake") {
-              handleVadDecision();
             }
+            // WAKE MODE: do NOT run the VAD utterance-capture state machine here.
+            // handleVadDecision() -> endUtteranceCapture() called stopVadLoop() on every
+            // speech->silence, which disconnected the VAD socket AND tore down mic capture
+            // for the 1-3s STT pass (the "VAD disconnects when I talk" symptom) and starved
+            // the rolling processWakeChunk detector. In awaiting_wake we keep the socket
+            // connected purely to update st.vadSpeechProb (the processWakeChunk gate); wake
+            // detection is driven solely by the continuous MediaRecorder chunk path.
           };
         }
         st.vadMicSourceNode.connect(st.vadProcessor);
