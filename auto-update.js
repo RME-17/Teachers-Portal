@@ -83,7 +83,7 @@ function initAutoUpdate(getMainWindow) {
   };
 
   setTimeout(runCheck, 12_000);
-  setInterval(runCheck, 4 * 60 * 60 * 1000);
+  setInterval(runCheck, 5 * 60 * 1000);
 }
 
 /**
