@@ -18628,9 +18628,13 @@ function setAssistantBubbleText(bubble, text) {
             const _rmeMicPrefs = loadVoiceMicPrefs();
             _voiceMicGain = _rmeMicPrefs.gain;
             const _rmeAudioConstraints = {
-                echoCancellation: true,
+                // Raw-capture mode: when the user turns Noise suppression OFF we also
+                // disable echo cancellation and auto gain control. The WebRTC AEC/AGC/NS
+                // chain was crushing quiet mics to near-silence (int16_peak ~30) before
+                // VAD ever saw the audio. Raw capture lets real speech energy through.
+                echoCancellation: _rmeMicPrefs.noiseSuppression,
                 noiseSuppression: _rmeMicPrefs.noiseSuppression,
-                autoGainControl: true,
+                autoGainControl: _rmeMicPrefs.noiseSuppression,
               };
             if (_rmeMicPrefs.deviceId) {
               _rmeAudioConstraints.deviceId = { exact: _rmeMicPrefs.deviceId };
