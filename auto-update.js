@@ -93,6 +93,7 @@ function registerAutoUpdateIpc(ipcMain) {
   ipcMain.handle("app-update:status", () => ({
     enabled: isAutoUpdateEnabled(),
     portable: isPortableWindowsBuild(),
+    version: app.getVersion(),
   }));
 
   ipcMain.handle("app-update:check", async () => {

@@ -19584,6 +19584,15 @@ function setAppTheme(theme) {
     wireMemory();
     wireChatInput();
     startPolling();
+    try {
+      var __rmeVerEl = document.getElementById("rmeVmcAppVersion");
+      var __rmeUpApi = window.appUpdateApi;
+      if (__rmeVerEl && __rmeUpApi && typeof __rmeUpApi.status === "function") {
+        __rmeUpApi.status().then(function (s) {
+          if (s && s.version) __rmeVerEl.textContent = "Version " + s.version;
+        }).catch(function () {});
+      }
+    } catch (e) {}
   }
 
   function buildHtml() {
@@ -19603,6 +19612,7 @@ function setAppTheme(theme) {
           '<div class="rme-vmc-orb-area" id="rmeVmcOrbArea"></div>',
           '<span class="rme-vmc-state-label" id="rmeVmcStateLabel">Asleep</span>',
           '<span class="rme-vmc-state-hint" id="rmeVmcStateHint">Say "ready for launch"</span>',
+          '<span class="rme-vmc-app-version" id="rmeVmcAppVersion" style="margin-top:.5rem;font-size:.7rem;opacity:.65;letter-spacing:.03em;">Version --</span>',
           '<div class="rme-vmc-hero-controls">',
             '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcWakeBtn">Wake</button>',
             '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcStopSpeakingBtn">Stop Speaking</button>',
