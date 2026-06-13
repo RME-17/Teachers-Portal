@@ -17640,6 +17640,37 @@ setupAccountSecurityPanels();
   let _vadDiagBlocked_ts = 0;
   let _vadFramesSent_ts = 0;
   let _vadMicDiag_ts = 0;
+  const RME_VOICE_MIC_KEY = "rme-voice-mic-v1";
+  let _voiceMicGain = 1;
+  function loadVoiceMicPrefs() {
+    try {
+      const raw = window.localStorage.getItem(RME_VOICE_MIC_KEY);
+      const p = raw ? JSON.parse(raw) : {};
+      let gain = Number(p && p.gain);
+      if (!isFinite(gain) || gain < 1) gain = 1;
+      if (gain > 10) gain = 10;
+      return {
+        deviceId: typeof (p && p.deviceId) === "string" ? p.deviceId : "",
+        noiseSuppression: (p && p.noiseSuppression) === false ? false : true,
+        gain,
+      };
+    } catch {
+      return { deviceId: "", noiseSuppression: true, gain: 1 };
+    }
+  }
+  try {
+    _voiceMicGain = loadVoiceMicPrefs().gain;
+    window.addEventListener("rme-voice-mic-changed", (ev) => {
+      try {
+        const d = ev && ev.detail;
+        if (d && typeof d.gain === "number" && isFinite(d.gain)) {
+          _voiceMicGain = Math.min(10, Math.max(1, d.gain));
+        } else {
+          _voiceMicGain = loadVoiceMicPrefs().gain;
+        }
+      } catch {}
+    });
+  } catch {}
   let _bargeinDiag_ts = 0;
   const VAD_SPEECH_THRESHOLD = 0.35; // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
@@ -18336,8 +18367,17 @@ function setAssistantBubbleText(bubble, text) {
               return;
             }
             _vadDiagSilentOnce = false;
-            const input = ev.inputBuffer.getChannelData(0);
+            let input = ev.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
+            if (_voiceMicGain && _voiceMicGain !== 1) {
+              const _g = _voiceMicGain;
+              const _boosted = new Float32Array(input.length);
+              for (let i = 0; i < input.length; i++) {
+                const v = input[i] * _g;
+                _boosted[i] = v > 1 ? 1 : v < -1 ? -1 : v;
+              }
+              input = _boosted;
+            }
             // Compute RMS of the Float32 buffer before conversion
             let sumSq = 0;
             for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
@@ -18585,12 +18625,18 @@ function setAssistantBubbleText(bubble, text) {
          st.lastWakeCheckAt = 0;
          st.wakeRingChunks = [];
          try {
-            st.stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
+            const _rmeMicPrefs = loadVoiceMicPrefs();
+            _voiceMicGain = _rmeMicPrefs.gain;
+            const _rmeAudioConstraints = {
                 echoCancellation: true,
-                noiseSuppression: true,
+                noiseSuppression: _rmeMicPrefs.noiseSuppression,
                 autoGainControl: true,
-              },
+              };
+            if (_rmeMicPrefs.deviceId) {
+              _rmeAudioConstraints.deviceId = { exact: _rmeMicPrefs.deviceId };
+            }
+            st.stream = await navigator.mediaDevices.getUserMedia({
+              audio: _rmeAudioConstraints,
              });
              // Log the actual device and format being used
              try {

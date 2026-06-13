@@ -655,6 +655,139 @@
     return card;
   }
 
+  const RME_VOICE_MIC_KEY = "rme-voice-mic-v1";
+
+  function loadVoiceMicSettings() {
+    try {
+      const raw = window.localStorage.getItem(RME_VOICE_MIC_KEY);
+      const p = raw ? JSON.parse(raw) : {};
+      let gain = Number(p && p.gain);
+      if (!isFinite(gain) || gain < 1) gain = 1;
+      if (gain > 10) gain = 10;
+      return {
+        deviceId: typeof (p && p.deviceId) === "string" ? p.deviceId : "",
+        noiseSuppression: (p && p.noiseSuppression) === false ? false : true,
+        gain,
+      };
+    } catch {
+      return { deviceId: "", noiseSuppression: true, gain: 1 };
+    }
+  }
+
+  function saveVoiceMicSettings(patch) {
+    const next = Object.assign(loadVoiceMicSettings(), patch || {});
+    try {
+      window.localStorage.setItem(RME_VOICE_MIC_KEY, JSON.stringify(next));
+    } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent("rme-voice-mic-changed", { detail: next }));
+    } catch {}
+    return next;
+  }
+
+  function renderVoiceCard() {
+    const cur = loadVoiceMicSettings();
+    const { card, body } = settingsCard(
+      "Voice & microphone",
+      "Pick the mic the assistant listens to and boost a quiet input.",
+    );
+
+    const micSel = document.createElement("select");
+    micSel.className = "rme-settings-select";
+    micSel.id = "rmeSettingsMicDevice";
+    const defOpt = document.createElement("option");
+    defOpt.value = "";
+    defOpt.textContent = "System default";
+    micSel.appendChild(defOpt);
+    micSel.addEventListener("change", () => {
+      saveVoiceMicSettings({ deviceId: micSel.value });
+    });
+    body.appendChild(settingsRow("Microphone", micSel));
+
+    function populateMics() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => {
+          const inputs = devices.filter((d) => d.kind === "audioinput");
+          while (micSel.children.length > 1) micSel.removeChild(micSel.lastChild);
+          let n = 0;
+          for (const d of inputs) {
+            n++;
+            const opt = document.createElement("option");
+            opt.value = d.deviceId;
+            opt.textContent = d.label || ("Microphone " + n);
+            if (d.deviceId === cur.deviceId) opt.selected = true;
+            micSel.appendChild(opt);
+          }
+        })
+        .catch(() => {});
+    }
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((s) => {
+          s.getTracks().forEach((t) => t.stop());
+          populateMics();
+        })
+        .catch(() => {
+          populateMics();
+        });
+    } else {
+      populateMics();
+    }
+
+    const nsSeg = document.createElement("div");
+    nsSeg.className = "rme-settings-seg";
+    for (const opt of [
+      { v: true, label: "On" },
+      { v: false, label: "Off" },
+    ]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = opt.label;
+      if (cur.noiseSuppression === opt.v) b.classList.add("rme-settings-seg--on");
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        saveVoiceMicSettings({ noiseSuppression: opt.v });
+        nsSeg.querySelectorAll("button").forEach((x) => {
+          x.classList.toggle("rme-settings-seg--on", x === b);
+        });
+      });
+      nsSeg.appendChild(b);
+    }
+    body.appendChild(settingsRow("Noise suppression", nsSeg));
+
+    const gainWrap = document.createElement("div");
+    gainWrap.className = "rme-settings-sound-row";
+    const gain = document.createElement("input");
+    gain.type = "range";
+    gain.min = "1";
+    gain.max = "10";
+    gain.step = "1";
+    gain.value = String(cur.gain);
+    gain.className = "rme-settings-range";
+    const gainVal = document.createElement("span");
+    gainVal.className = "rme-settings-note";
+    gainVal.textContent = "x" + cur.gain;
+    gain.addEventListener("input", () => {
+      gainVal.textContent = "x" + gain.value;
+    });
+    gain.addEventListener("change", () => {
+      saveVoiceMicSettings({ gain: Number(gain.value) });
+    });
+    gainWrap.appendChild(gain);
+    gainWrap.appendChild(gainVal);
+    body.appendChild(settingsRow("Input boost", gainWrap));
+
+    const note = document.createElement("p");
+    note.className = "rme-settings-note";
+    note.textContent =
+      "Microphone and noise-suppression changes take effect next time you start a voice session. Input boost applies right away. If speech still is not detected, also raise the mic level in Windows Sound settings.";
+    body.appendChild(note);
+    return card;
+  }
+
   async function render() {
     const root = document.getElementById("rmeSettingsRoot");
     const page = document.getElementById("pageSettings");
@@ -667,6 +800,7 @@
     grid.className = "rme-settings-grid-inner";
     grid.appendChild(renderAppearanceCard());
     grid.appendChild(renderPlannerCard());
+    grid.appendChild(renderVoiceCard());
     if (!isTeacherPortal()) {
       grid.appendChild(renderWorkspaceCard());
     }
