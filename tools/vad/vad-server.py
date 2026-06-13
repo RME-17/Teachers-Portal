@@ -85,20 +85,34 @@ async def handle_vad(websocket):
 				frame = pcm_accum[:FRAME_BYTES]
 				pcm_accum = pcm_accum[FRAME_BYTES:]
 				frame_count += 1
-				pcm = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
-				# Amplitude diagnostics: log RMS/min/max of the raw int16 frame
-				pcm_int16 = np.frombuffer(frame, dtype=np.int16)
-				abs_max = int(np.max(np.abs(pcm_int16)))
-				rms_int = int(np.sqrt(np.mean(pcm_int16.astype(np.float64) ** 2)))
-				if _last_log_at and time.time() - _last_log_at >= 5.0:
-					log.info("VAD frame: count=%d int16_rms=%d int16_peak=%d float_rms=%.4f",
-						frame_count, rms_int, abs_max, float(np.sqrt(np.mean(pcm ** 2))))
-					_last_log_at = time.time()
-				tensor = torch.from_numpy(pcm).float().to(device)
-				prob = detect_speech(tensor)
-				await websocket.send(json.dumps({"speech_prob": round(prob, 4)}))
-	except Exception:
-		pass
+				try:
+					pcm = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
+					# Amplitude diagnostics: log RMS/min/max of the raw int16 frame
+					pcm_int16 = np.frombuffer(frame, dtype=np.int16)
+					abs_max = int(np.max(np.abs(pcm_int16)))
+					rms_int = int(np.sqrt(np.mean(pcm_int16.astype(np.float64) ** 2)))
+					if _last_log_at and time.time() - _last_log_at >= 5.0:
+						log.info("VAD frame: count=%d int16_rms=%d int16_peak=%d float_rms=%.4f",
+							frame_count, rms_int, abs_max, float(np.sqrt(np.mean(pcm ** 2))))
+						_last_log_at = time.time()
+					tensor = torch.from_numpy(pcm).float().to(device)
+					prob = detect_speech(tensor)
+					await websocket.send(json.dumps({"speech_prob": round(prob, 4)}))
+				except Exception as frame_err:
+					if frame_err.__class__.__name__.startswith("ConnectionClosed"):
+						raise
+					log.exception("VAD frame %d failed; keeping client connected", frame_count)
+					try:
+						if device == "cuda":
+							torch.cuda.empty_cache()
+					except Exception:
+						pass
+					continue
+	except Exception as loop_err:
+		if loop_err.__class__.__name__.startswith("ConnectionClosed"):
+			log.info("VAD client connection closed")
+		else:
+			log.exception("VAD connection loop ended with error")
 	finally:
 		log.info("VAD client disconnected")
 
