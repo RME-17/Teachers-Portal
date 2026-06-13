@@ -17672,7 +17672,8 @@ setupAccountSecurityPanels();
     });
   } catch {}
   let _bargeinDiag_ts = 0;
-  const VAD_SPEECH_THRESHOLD = 0.35; // was 0.5 — lowered for quiet-mic sensitivity
+  const VAD_SPEECH_THRESHOLD = 0.35;
+  const WAKE_VAD_GATE = 0.08; // dead-silence floor only; quiet speech still runs the Whisper wake check // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
   const VAD_MIN_SILENCE_MS = 1500; // longer pause before finalizing turn (was 700, too short)
   const VAD_SPEECH_PAD_MS = 400; // trailing audio pad after speech ends (was 300)
@@ -18471,7 +18472,9 @@ function setAssistantBubbleText(bubble, text) {
 
         if (st.wakeRingChunks.length < WAKE_MIN_CHUNKS) return;
 
-        if (st.vadConnected && st.vadSpeechProb < VAD_SPEECH_THRESHOLD) return;
+        // Only skip on dead silence. dynaudnorm + Whisper + the 3s debounce are the real
+        // matcher; quiet-but-real speech (Silero prob well under 0.35) must still be transcribed.
+        if (st.vadConnected && st.vadSpeechProb < WAKE_VAD_GATE) return;
 
         const blob = buildWakeProbeBlob();
         if (!blob || blob.size < WAKE_MIN_BYTES) return;
