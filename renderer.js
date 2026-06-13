@@ -17634,8 +17634,8 @@ setupAccountSecurityPanels();
   const WAKE_RING_MAX_CHUNKS = 16;
   const WAKE_TAIL_CHUNKS = 10;
   const WAKE_MIN_CHUNKS = 4;
-  const WAKE_MIN_BYTES = 14000;
-  const WAKE_CHECK_DEBOUNCE_MS = 3000;
+  const WAKE_MIN_BYTES = 6000;
+  const WAKE_CHECK_DEBOUNCE_MS = 2000;
   let _vadDiagSilentOnce = false;
   let _vadDiagBlocked_ts = 0;
   let _vadFramesSent_ts = 0;
@@ -17674,7 +17674,8 @@ setupAccountSecurityPanels();
   } catch {}
   let _bargeinDiag_ts = 0;
   const VAD_SPEECH_THRESHOLD = 0.35;
-  const WAKE_VAD_GATE = 0.08; // dead-silence floor only; quiet speech still runs the Whisper wake check // was 0.5 — lowered for quiet-mic sensitivity
+  const WAKE_VAD_GATE = 0.08;
+  const WAKE_RAW_SILENCE_FLOOR = 0.004; // raw (pre-gain) peak below this ~= dead silence // dead-silence floor only; quiet speech still runs the Whisper wake check // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
   const VAD_MIN_SILENCE_MS = 1500; // longer pause before finalizing turn (was 700, too short)
   const VAD_SPEECH_PAD_MS = 400; // trailing audio pad after speech ends (was 300)
@@ -18402,6 +18403,10 @@ function setAssistantBubbleText(bubble, text) {
             let sumSq = 0;
             for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
             const rms = Math.sqrt(sumSq / input.length);
+            // Track raw (pre-gain) mic energy so the wake gate has reliable, local data
+            // and never depends on the VAD socket speech_prob round-trip.
+            st.lastRawPeak = Math.max(_rawPeak, (st.lastRawPeak || 0) * 0.92);
+            st.lastMicAt = Date.now();
             if (_vadMicDiag_ts === 0) {
               _vadMicDiag_ts = Date.now();
               console.log("[voice] VAD mic buffer: length=" + input.length + " sampleRate=" + st.vadAudioCtx.sampleRate + " rms=" + rms.toFixed(6));
@@ -18496,9 +18501,13 @@ function setAssistantBubbleText(bubble, text) {
 
         if (st.wakeRingChunks.length < WAKE_MIN_CHUNKS) return;
 
-        // Only skip on dead silence. dynaudnorm + Whisper + the 3s debounce are the real
-        // matcher; quiet-but-real speech (Silero prob well under 0.35) must still be transcribed.
-        if (st.vadConnected && st.vadSpeechProb < WAKE_VAD_GATE) return;
+        // Self-contained near-silence gate. We no longer depend on the VAD socket speech_prob
+        // (which could stay 0 and block wake detection forever — the long-standing bug).
+        // Skip ONLY on true dead silence using the raw pre-gain mic peak tracked above;
+        // Parakeet/Whisper + the debounce are the real matcher, so any real speech is checked.
+        const _rawRecent = typeof st.lastRawPeak === "number" ? st.lastRawPeak : 1;
+        const _micFresh = st.lastMicAt && Date.now() - st.lastMicAt < 1500;
+        if (_micFresh && _rawRecent < WAKE_RAW_SILENCE_FLOOR) return;
 
         const blob = buildWakeProbeBlob();
         if (!blob || blob.size < WAKE_MIN_BYTES) return;
