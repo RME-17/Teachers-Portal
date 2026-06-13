@@ -18637,7 +18637,9 @@ function setAssistantBubbleText(bubble, text) {
                 // VAD ever saw the audio. Raw capture lets real speech energy through.
                 echoCancellation: _rmeMicPrefs.noiseSuppression,
                 noiseSuppression: _rmeMicPrefs.noiseSuppression,
-                autoGainControl: _rmeMicPrefs.noiseSuppression,
+                // AGC stays ON even in raw mode: it auto-boosts quiet mics. NS/AEC were the
+                // stages crushing speech to silence; auto-gain is the part that helps.
+                autoGainControl: true,
               };
             if (_rmeMicPrefs.deviceId) {
               _rmeAudioConstraints.deviceId = { exact: _rmeMicPrefs.deviceId };
