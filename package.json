@@ -1,6 +1,6 @@
 {
   "name": "recruit-my-english",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Recruit My English — simple desktop app",
   "main": "main.js",
   "scripts": {
