@@ -17678,7 +17678,7 @@ setupAccountSecurityPanels();
   const WAKE_VAD_GATE = 0.08;
   const WAKE_RAW_SILENCE_FLOOR = 0.004; // raw (pre-gain) peak below this ~= dead silence // dead-silence floor only; quiet speech still runs the Whisper wake check // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
-  const VAD_MIN_SILENCE_MS = 1500; // longer pause before finalizing turn (was 700, too short)
+  const VAD_MIN_SILENCE_MS = 2200; // longer pause before finalizing turn (700->1500->2200; wait for user to finish before sending)
   const VAD_SPEECH_PAD_MS = 400; // trailing audio pad after speech ends (was 300)
   const VAD_MAX_UTTERANCE_MS = 45000;
   const VAD_SAMPLE_RATE = 16000;
