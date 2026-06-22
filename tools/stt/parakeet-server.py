@@ -41,7 +41,7 @@ parser.add_argument("--port", type=int, default=int(os.environ.get("RME_PARAKEET
 	help="Port to listen on")
 parser.add_argument("--device", default=os.environ.get("RME_PARAKEET_DEVICE", "cuda"),
 	help="Device: cuda or cpu")
-parser.add_argument("--model", default=os.environ.get("RME_PARAKEET_MODEL", "parakeet-tdt-0.6b-v3"),
+parser.add_argument("--model", default=os.environ.get("RME_PARAKEET_MODEL", "parakeet-tdt-0.6b-v2"),
 	help="NeMo ASR model repo id")
 args = parser.parse_args()
 
