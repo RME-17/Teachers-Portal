@@ -17622,10 +17622,10 @@ setupAccountSecurityPanels();
     orbBtn: null,
     textChatWired: false,
     orbWired: false,
-    bargeinEnabled: true,
-    bargeinMinSpeechMs: 350,
-    bargeinGraceMs: 250,
-    bargeinVadThreshold: 0.7,
+    bargeinEnabled: false,
+    bargeinMinSpeechMs: 700,
+    bargeinGraceMs: 700,
+    bargeinVadThreshold: 0.9,
     bargeinAborted: false,
     bargeinSustainedMs: 0,
     bargeinGraceRemaining: 0,
@@ -17684,11 +17684,13 @@ setupAccountSecurityPanels();
   const VAD_SAMPLE_RATE = 16000;
   const VAD_BUFFER_SIZE = 512;
   const VAD_SPEECH_PAD_SAMPLES = Math.round(VAD_SPEECH_PAD_MS / 1000 * VAD_SAMPLE_RATE);
+  const VAD_PREROLL_MS = 1000; // v1.0.31: leading audio kept before speech onset (was 400) -> fixes first-word clipping
+  const VAD_PREROLL_SAMPLES = Math.round(VAD_PREROLL_MS / 1000 * VAD_SAMPLE_RATE);
   const WAKE_VAD_MIN_SILENCE_MS = 1000;
-  const BARGEIN_ENABLED = true;
-  const BARGEIN_MIN_SPEECH_MS = 350;
-  const BARGEIN_GRACE_MS = 250;
-  const BARGEIN_VAD_THRESHOLD = 0.7;
+  const BARGEIN_ENABLED = false;
+  const BARGEIN_MIN_SPEECH_MS = 700;
+  const BARGEIN_GRACE_MS = 700;
+  const BARGEIN_VAD_THRESHOLD = 0.9;
   const INTERRUPT_PHRASE = "stop talking now";
   const INTERRUPT_PHRASE_SHORT = "stop talking";
   let _vadCfgPrinted = false;
@@ -18187,9 +18189,9 @@ function setAssistantBubbleText(bubble, text) {
        st.vadUtterancePcmChunks = [];
        st.vadTrailingPadRemaining = 0;
        if (st.vadPrerollBuf && st.vadPrerollFilled) {
-         const pad = new Float32Array(VAD_SPEECH_PAD_SAMPLES);
-         for (let i = 0; i < VAD_SPEECH_PAD_SAMPLES; i++) {
-           pad[i] = st.vadPrerollBuf[(st.vadPrerollWritePos + i) % VAD_SPEECH_PAD_SAMPLES];
+         const pad = new Float32Array(VAD_PREROLL_SAMPLES);
+         for (let i = 0; i < VAD_PREROLL_SAMPLES; i++) {
+           pad[i] = st.vadPrerollBuf[(st.vadPrerollWritePos + i) % VAD_PREROLL_SAMPLES];
          }
          st.vadUtterancePcmChunks.push(pad);
        }
@@ -18445,14 +18447,14 @@ function setAssistantBubbleText(bubble, text) {
             }
             if (vadSocketLive) { try { st.vadSocket.send(int16.buffer); } catch {} }
             if (!st.vadPrerollBuf) {
-              st.vadPrerollBuf = new Float32Array(VAD_SPEECH_PAD_SAMPLES);
+              st.vadPrerollBuf = new Float32Array(VAD_PREROLL_SAMPLES);
               st.vadPrerollWritePos = 0;
               st.vadPrerollFilled = false;
             }
             for (let i = 0; i < input.length; i++) {
               st.vadPrerollBuf[st.vadPrerollWritePos] = input[i];
               st.vadPrerollWritePos++;
-              if (st.vadPrerollWritePos >= VAD_SPEECH_PAD_SAMPLES) {
+              if (st.vadPrerollWritePos >= VAD_PREROLL_SAMPLES) {
                 st.vadPrerollWritePos = 0;
                 st.vadPrerollFilled = true;
               }
@@ -19682,7 +19684,7 @@ function setAppTheme(theme) {
           '<div class="rme-vmc-hero-controls">',
             '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcWakeBtn">Wake</button>',
             '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcStopSpeakingBtn">Stop Speaking</button>',
-            '<button class="rme-vmc-btn rme-vmc-btn--toggle rme-vmc-btn--on" id="rmeVmcBargeinBtn">Barge-in: On</button>',
+            '<button class="rme-vmc-btn rme-vmc-btn--toggle" id="rmeVmcBargeinBtn">Barge-in: Off</button>',
             '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcReconnectBtn">Reconnect</button>',
             '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcTestVoiceBtn">Test Voice</button>',
             '<button class="rme-vmc-btn rme-vmc-btn--action" id="rmeVmcClearTranscriptBtn">Clear Transcript</button>',
