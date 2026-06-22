@@ -18212,6 +18212,18 @@ function setAssistantBubbleText(bubble, text) {
          allPcm.set(c, offset);
          offset += c.length;
        }
+       // Peak-normalize quiet mics so Parakeet does not hallucinate or drop words
+       // on low-amplitude audio. Gain is capped so we never blow up background noise.
+       let _sttPeak = 0;
+       for (let i = 0; i < allPcm.length; i++) {
+         const a = allPcm[i] < 0 ? -allPcm[i] : allPcm[i];
+         if (a > _sttPeak) _sttPeak = a;
+       }
+       if (_sttPeak > 0.0008 && _sttPeak < 0.65) {
+         const _sttGain = Math.min(12, 0.65 / _sttPeak);
+         for (let i = 0; i < allPcm.length; i++) allPcm[i] *= _sttGain;
+         console.log("[voice] STT gain: peak=" + _sttPeak.toFixed(4) + " gain=" + _sttGain.toFixed(2));
+       }
        const int16 = new Int16Array(allPcm.length);
        for (let i = 0; i < allPcm.length; i++) {
          const s = Math.max(-1, Math.min(1, allPcm[i]));
