@@ -2107,7 +2107,7 @@ if (!gotTheLock) {
         windowsHide: true,
       });
       _vadProc.on("error", (err) => {
-        console.warn("[vad] Spawn error:", err.message);
+        console.error("[vad] FAILED to start Silero VAD sidecar:", err.message, "— voice input will be DEGRADED (no speech detection). Ensure Python is installed and run: pip install -r tools/vad/requirements.txt");
         _vadProc = null;
       });
       _vadProc.stdout.on("data", (d) => {
@@ -2119,8 +2119,12 @@ if (!gotTheLock) {
         if (text) console.log("[vad-server]", text);
       });
       _vadProc.on("exit", (code) => {
-        console.log(`[vad] VAD server exited code=${code}`);
         _vadProc = null;
+        if (code === 0 || code === null) {
+          console.log(`[vad] VAD server exited code=${code}`);
+        } else {
+          console.error(`[vad] Silero VAD sidecar EXITED abnormally (code=${code}) — voice input will be DEGRADED (no speech detection). Check deps: pip install -r tools/vad/requirements.txt (needs websockets>=13, silero-vad, torch).`);
+        }
       });
     } catch (e) {
       console.warn("[vad] Failed to start VAD sidecar:", e instanceof Error ? e.message : String(e));

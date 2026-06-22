@@ -17674,6 +17674,7 @@ setupAccountSecurityPanels();
   } catch {}
   let _bargeinDiag_ts = 0;
   const VAD_SPEECH_THRESHOLD = 0.35;
+  const VAD_ENERGY_FALLBACK_PEAK = 0.02; // raw (pre-gain) peak gate used when the VAD sidecar speech_prob is unavailable/stale
   const WAKE_VAD_GATE = 0.08;
   const WAKE_RAW_SILENCE_FLOOR = 0.004; // raw (pre-gain) peak below this ~= dead silence // dead-silence floor only; quiet speech still runs the Whisper wake check // was 0.5 — lowered for quiet-mic sensitivity
   const VAD_MIN_SPEECH_MS = 250;
@@ -18053,6 +18054,7 @@ function setAssistantBubbleText(bubble, text) {
               const data = JSON.parse(typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data));
               if (typeof data.speech_prob === "number") {
                 st.vadSpeechProb = data.speech_prob;
+                st.vadProbLastAt = Date.now();
                 // Log first received frame & every ~3s thereafter
                 if (_vadFramesSent_ts === 0) {
                   _vadFramesSent_ts = Date.now();
@@ -18306,7 +18308,15 @@ function setAssistantBubbleText(bubble, text) {
           }
           return;
         }
-        const speaking = st.vadSpeechProb > VAD_SPEECH_THRESHOLD;
+        // Prefer the VAD sidecar speech_prob, but it can be unavailable (sidecar
+        // crashed / never started) or stale, in which case it stays 0 forever and
+        // conversation capture would never trigger — the same class of bug fixed
+        // for the wake path. Fall back to the local raw-peak energy gate so we still
+        // pick up the user's voice when the sidecar is not responding.
+        const vadProbFresh = st.vadProbLastAt && (Date.now() - st.vadProbLastAt < 1500);
+        const speaking = vadProbFresh
+          ? st.vadSpeechProb > VAD_SPEECH_THRESHOLD
+          : (st.lastRawPeak || 0) > VAD_ENERGY_FALLBACK_PEAK;
         if (speaking) {
           st.vadSilenceMs = 0;
           st.vadSpeechMs += VAD_BUFFER_SIZE / VAD_SAMPLE_RATE * 1000;
@@ -18360,16 +18370,18 @@ function setAssistantBubbleText(bubble, text) {
         if (!st.vadProcessor) {
           st.vadProcessor = st.vadAudioCtx.createScriptProcessor(VAD_BUFFER_SIZE, 1, 1);
           st.vadProcessor.onaudioprocess = (ev) => {
-            if (!st.vadConnected || !st.vadSocket || st.vadSocket.readyState !== WebSocket.OPEN) {
+            const vadSocketLive = !!(st.vadConnected && st.vadSocket && st.vadSocket.readyState === WebSocket.OPEN);
+            if (!vadSocketLive) {
               const now = Date.now();
               if (!_vadDiagSilentOnce || now - (_vadDiagBlocked_ts || 0) > 3000) {
                 _vadDiagSilentOnce = true;
                 _vadDiagBlocked_ts = now;
-                console.warn("[voice] VAD audio frames blocked — connected=" + st.vadConnected + " socketReady=" + (st.vadSocket ? st.vadSocket.readyState : "null") + " voicePlaying=" + voicePlaying + " busy=" + st.busy);
+                console.warn("[voice] VAD socket down — using local energy fallback. connected=" + st.vadConnected + " socketReady=" + (st.vadSocket ? st.vadSocket.readyState : "null") + " voicePlaying=" + voicePlaying + " busy=" + st.busy);
+                try { if (st.voicePhase === "conversing" && typeof setStatus === "function") setStatus("Voice input degraded — speech detector offline (using fallback).", true); } catch {}
               }
-              return;
+            } else {
+              _vadDiagSilentOnce = false;
             }
-            _vadDiagSilentOnce = false;
             let input = ev.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
             // Adaptive auto-gain: quiet mics (raw peak ~0.01) never trip Silero VAD,
@@ -18419,7 +18431,7 @@ function setAssistantBubbleText(bubble, text) {
               const s = Math.max(-1, Math.min(1, input[i]));
               int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
-            st.vadSocket.send(int16.buffer);
+            if (vadSocketLive) { try { st.vadSocket.send(int16.buffer); } catch {} }
             if (!st.vadPrerollBuf) {
               st.vadPrerollBuf = new Float32Array(VAD_SPEECH_PAD_SAMPLES);
               st.vadPrerollWritePos = 0;
