@@ -69,7 +69,95 @@ if hasattr(model, "preprocessor"):
 load_s = time.time() - t0
 log.info("Parakeet loaded in %.1fs on %s", load_s, device)
 
+BEAM_SIZE = int(os.environ.get("RME_PARAKEET_BEAM_SIZE", "1"))
+if BEAM_SIZE > 1:
+	try:
+		from omegaconf import open_dict
+		decoding_cfg = model.cfg.decoding
+		with open_dict(decoding_cfg):
+			decoding_cfg.strategy = "maes"
+			if "beam" in decoding_cfg:
+				decoding_cfg.beam.beam_size = BEAM_SIZE
+		model.change_decoding_strategy(decoding_cfg)
+		log.info("Parakeet decoding: strategy=maes beam_size=%d", BEAM_SIZE)
+	except Exception as _beam_err:
+		log.warning("Beam decoding unavailable (%s); using greedy", _beam_err)
+else:
+	log.info("Parakeet decoding: strategy=greedy (set RME_PARAKEET_BEAM_SIZE>1 to enable beam)")
+
+
 inference_lock = asyncio.Lock()
+
+import difflib
+
+def _env_flag(name, default=False):
+	v = str(os.environ.get(name, "")).strip().lower()
+	if v in ("1", "true", "yes", "on"):
+		return True
+	if v in ("0", "false", "no", "off"):
+		return False
+	return default
+
+BOOST_WORDS = [w.strip() for w in str(os.environ.get("RME_PARAKEET_BOOST_WORDS", "")).split(",") if w.strip()]
+BOOST_THRESHOLD = float(os.environ.get("RME_PARAKEET_BOOST_THRESHOLD", "0.82"))
+NORMALIZE_AUDIO = _env_flag("RME_PARAKEET_NORMALIZE", True)
+TRIM_SILENCE = _env_flag("RME_PARAKEET_TRIM_SILENCE", True)
+TARGET_PEAK = float(os.environ.get("RME_PARAKEET_TARGET_PEAK", "0.95"))
+SILENCE_RMS = float(os.environ.get("RME_PARAKEET_SILENCE_RMS", "0.005"))
+
+if BOOST_WORDS:
+	log.info("Parakeet word boosting enabled: %d phrase(s)", len(BOOST_WORDS))
+
+def _preprocess_audio(audio):
+	a = np.asarray(audio, dtype=np.float32)
+	if TRIM_SILENCE and a.size:
+		win = 320
+		n = (a.size // win) * win
+		if n > 0:
+			frames = a[:n].reshape(-1, win)
+			rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-9)
+			voiced = np.where(rms > SILENCE_RMS)[0]
+			if voiced.size:
+				start = max(0, int(voiced[0]) - 5) * win
+				end = min(len(rms), int(voiced[-1]) + 6) * win
+				a = a[start:end]
+	if NORMALIZE_AUDIO and a.size:
+		peak = float(np.max(np.abs(a)))
+		if peak > 1e-6:
+			a = a * (TARGET_PEAK / peak)
+		a = np.clip(a, -1.0, 1.0)
+	return a.astype(np.float32)
+
+def _apply_boost(text):
+	if not text or not BOOST_WORDS:
+		return text
+	result = text
+	for phrase in BOOST_WORDS:
+		parts = phrase.split()
+		plen = len(parts)
+		words = result.split()
+		if plen > 1:
+			i = 0
+			while i <= len(words) - plen:
+				window = " ".join(words[i:i + plen])
+				ratio = difflib.SequenceMatcher(None, window.lower(), phrase.lower()).ratio()
+				if ratio >= BOOST_THRESHOLD and window.lower() != phrase.lower():
+					words[i:i + plen] = parts
+					result = " ".join(words)
+					words = result.split()
+				i += 1
+		else:
+			new_words = []
+			for w in words:
+				core = w.strip(".,!?;:")
+				ratio = difflib.SequenceMatcher(None, core.lower(), phrase.lower()).ratio()
+				if len(core) >= 3 and ratio >= BOOST_THRESHOLD and core.lower() != phrase.lower():
+					new_words.append(w.replace(core, phrase))
+				else:
+					new_words.append(w)
+			result = " ".join(new_words)
+	return result
+
 
 
 async def handle_health(request):
@@ -111,6 +199,7 @@ async def handle_transcribe(request):
 			audio_np = scipy.signal.resample(audio_np, num_samples).astype(np.float32)
 			sr = 16000
 
+		audio_np = _preprocess_audio(audio_np)
 		duration_s = len(audio_np) / 16000
 		if duration_s < 0.3:
 			return web.json_response({"ok": False, "error": "Audio too short (< 0.3s)"}, status=400)
@@ -134,6 +223,7 @@ async def handle_transcribe(request):
 		else:
 			text = str(hypotheses).strip()
 
+		text = _apply_boost(text)
 		total_ms = (time.time() - t0) * 1000
 		log.info("transcribed %.1fs audio in %.0f ms → \"%s\"", duration_s, total_ms, text[:120])
 		return web.json_response({"ok": True, "text": text, "duration_s": round(duration_s, 2), "ms": round(total_ms)})
