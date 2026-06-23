@@ -82,6 +82,8 @@ function loadDotenv() {
     ? [
         path.join(path.dirname(process.execPath), ".env"),
         path.join(app.getPath("userData"), ".env"),
+        ...(process.env.APPDATA ? [path.join(process.env.APPDATA, "Recruit My English", ".env")] : []),
+        ...(process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, "Programs", "Recruit My English", ".env")] : []),
       ]
     : [
         path.join(app.getPath("userData"), ".env"),
